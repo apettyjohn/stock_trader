@@ -4,6 +4,7 @@ from lxml import html
 import requests
 
 def startup():
+    # Initiates a balance sheet if none exists and makes sure there is money to trade
     try:
         df = pd.read_csv('balance.csv')
     except:
@@ -17,6 +18,7 @@ def startup():
     print(f"Current Balance: ${dt_funds}")
 
 def logTrade(time,ticker,buy,sell):
+    # Initates a trade log if none exists and logs trades
     my_columns = ['Time','Ticker','Buy','Sell','Net']
     dt = datetime.fromtimestamp(time)
     try:
@@ -30,12 +32,17 @@ def logTrade(time,ticker,buy,sell):
     df.to_csv('trades.csv',index=False)
 
 def webScrap_list(type):
-    print(f'Making a request for list of stock {type}')
-    response = requests.get(f'https://finance.yahoo.com/{type}')
-    if response.status_code == 200:
+    # pulls lists of stocks from yahoo 
+    print(f'Making a request for list of {type}')
+    try:
+        response = requests.get(f'https://finance.yahoo.com/{type}')
+        if response.status_code == 200:
             print('Successfully pulled list')
-    else:
-        print(f'Http request failed. Status code: {response.status_code}')
+        else:
+            print(f'No response returned, status code: {response.status_code}')
+    except:
+        print(f'Http request failed. Check your connection')
+        return
 
     tree = html.fromstring(response.content)
     symbols = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[1]/a/text()')
@@ -59,3 +66,28 @@ def webScrap_list(type):
             df = pd.DataFrame([data],columns=my_columns)
 
     df.to_csv(f'{type}.csv',index=False)
+
+def checkBalance(Account):
+    # Reads the balance of the input account from balance.csv
+    df = pd.read_csv('balance.csv')
+    data = df.to_dict()
+    accounts = data['Account']
+    for n in list(range(len(accounts))):
+        if accounts[n] == Account:
+            return data['Balance'][n]
+    return 'NaN'
+
+def updateBalance(Account,change):
+    # modifies the balance of the input account in balance.csv by the input change
+    old_balance = checkBalance(Account)
+    if old_balance == 'NaN':
+        print(f'Could not update the balance of {Account}')
+        return
+    df = pd.DataFrame([[Account,old_balance + change]], columns=['Account','Balance'])
+    balance_sheet = pd.read_csv('balance.csv')
+    data = balance_sheet.to_dict()
+    accounts = data['Account']
+    for n in list(range(len(accounts))):
+        if accounts[n] != Account:
+            df = df.append(pd.Series([accounts[n]],data['Balance'][n],index=['Account','Balance']),ignore_index=True)
+    df.to_csv('balance.csv', index=False)
