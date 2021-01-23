@@ -1,7 +1,10 @@
 import pandas as pd
 from datetime import datetime
+from datetime import date
+import time
 from lxml import html
 import requests
+import csv
 
 def startup():
     # Initiates a balance sheet if none exists and makes sure there is money to trade
@@ -91,3 +94,62 @@ def updateBalance(Account,change):
         if accounts[n] != Account:
             df = df.append(pd.Series([accounts[n]],data['Balance'][n],index=['Account','Balance']),ignore_index=True)
     df.to_csv('balance.csv', index=False)
+
+def date2number(string,date):
+    if date == 'dmy':
+        format = "%d/%m/%Y"
+    elif date == 'dym':
+        format = "%d/%Y/%m"
+    elif date == 'mdy':
+        format = "%m/%d/%Y"
+    elif date == 'myd':
+        format = "%m/%Y/%d"
+    elif date == 'ymd':
+        format = "%Y/%m/%d"
+    elif date == 'ydm':
+        format = "%Y/%d/%m"
+    else:
+        print('Noticed custom date format')
+        format = date
+    try:
+        timestamp = int(time.mktime(datetime.strptime(string,format).timetuple()))
+    except:
+        print('Date could not be converted to a number')
+        return
+    return timestamp
+
+def getHistoricalData(ticker,frequency,yrs):
+
+    def pullData(ticker,frequency,yrs):
+        time_string = f'{date.today().day}/{date.today().month}/{date.today().year - yrs}'
+        timestamp = date2number(time_string,'dmy')
+        today = date2number(f'{date.today().day}/{date.today().month}/{date.today().year}',"dmy")
+        try:
+            print(f'Get request for initiated for {ticker} data ever {frequency} for {yrs} years')
+            response = requests.get(f'https://query1.finance.yahoo.com/v7/finance/download/{ticker}?period1={timestamp}&period2={today}&interval={frequency}&events=history&includeAdjustedClose=true')
+            if response.status_code == 200:
+                print('Successfully pulled data')
+            else:
+                print(f'No response returned, status code: {response.status_code}')
+        except:
+            print(f'Http request failed. Check your connection')
+            return 
+        return response
+
+    try:
+        df = pd.read_csv(f'stock_profiles/{ticker}.csv')
+        print(f'Data already exists for stock {ticker} from {df["Date"][0]} through {df["Date"][len(df["Date"])-1]}')
+        time_string = f'{date.today().day}/{date.today().month}/{date.today().year - yrs}'
+        timestamp = date2number(time_string,'dmy')
+        if date2number(df["Date"][0],'%Y-%m-%d') > timestamp:
+            x = input('Would you like to update [y/n]: ')
+            if x == 'y'or x == 'Y' or x == 'yes':
+                response = pullData(ticker,frequency,yrs)
+                f = open(f'stock_profiles/{ticker}.csv','w')
+                f.write(response.text)
+                f.close()
+    except:
+        response = pullData(ticker,frequency,yrs)
+        f = open(f'stock_profiles/{ticker}.csv','w')
+        f.write(response.text)
+        f.close()

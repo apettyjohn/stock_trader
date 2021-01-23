@@ -8,3 +8,5 @@ lists = ['gainers','losers','most-active','trending-tickers','cryptocurrencies']
 #   webScrap_list(category)
 updateBalance('day trader',0)
 print(f'The balance of day trader account is {checkBalance("day trader")}')
+
+getHistoricalData('AAPL','1d',3)
