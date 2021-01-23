@@ -118,7 +118,7 @@ def date2number(string,date):
         return
     return timestamp
 
-def getHistoricalData(ticker,frequency,yrs):
+def getHistoricalData(ticker,frequency,yrs,*supress):
 
     def pullData(ticker,frequency,yrs):
         time_string = f'{date.today().day}/{date.today().month}/{date.today().year - yrs}'
@@ -153,3 +153,36 @@ def getHistoricalData(ticker,frequency,yrs):
         f = open(f'stock_profiles/{ticker}.csv','w')
         f.write(response.text)
         f.close()
+
+def txt2csv(location,delimiter,output,*noLastLine):
+    try:
+        csv_file = open(f'{output}.csv','r')
+        print(f'Csv file already exists for {location}.txt file')
+        return
+    except:
+        if not(noLastLine==True or noLastLine==False):
+            noLastLine = False
+        file = open(f'{location}.txt','r')
+        lines = file.readlines()
+        columns = []
+        print('Beginning txt to csv conversion')
+        for n in range(len(lines)):
+            line = lines[n]
+            if line:
+                if n == 0:
+                    first_line = line.split(f'{delimiter}')
+                    columns = first_line[0]
+                elif n == len(lines)-1:
+                    file = open('output.csv',"w")
+                    df.to_csv(f'{output}.csv',index=False)
+                    if noLastLine:
+                        print(f'Successfully converted {location}.txt to {output}.csv')
+                        return
+                else:
+                    data = line.split(f'{delimiter}')
+                    if n == 1:
+                        df = pd.DataFrame([[data[0]]],columns=[columns])
+                    else:
+                        df = df.append(pd.Series([data[0]],index=[columns]),ignore_index=True)
+        df.to_csv(f'{output}.csv',index=False)
+        print(f'Successfully converted {location}.txt to {output}.csv')
