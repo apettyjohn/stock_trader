@@ -5,6 +5,7 @@ import time
 from lxml import html
 import requests
 import csv
+import os
 
 def startup():
     # Initiates a balance sheet if none exists and makes sure there is money to trade
@@ -109,7 +110,7 @@ def date2number(string,date):
     elif date == 'ydm':
         format = "%Y/%d/%m"
     else:
-        print('Noticed custom date format')
+        #print('Noticed custom date format')
         format = date
     try:
         timestamp = int(time.mktime(datetime.strptime(string,format).timetuple()))
@@ -120,15 +121,18 @@ def date2number(string,date):
 
 def getHistoricalData(ticker,frequency,yrs,*supress):
 
-    def pullData(ticker,frequency,yrs):
+    def pullData(ticker,frequency,yrs,*supress):
+        if not(supress==True or supress==False):
+            supress = False
         time_string = f'{date.today().day}/{date.today().month}/{date.today().year - yrs}'
         timestamp = date2number(time_string,'dmy')
         today = date2number(f'{date.today().day}/{date.today().month}/{date.today().year}',"dmy")
         try:
-            print(f'Get request for initiated for {ticker} data ever {frequency} for {yrs} years')
+            print(f'Get: request initiated for {ticker} data every {frequency} for {yrs} years')
             response = requests.get(f'https://query1.finance.yahoo.com/v7/finance/download/{ticker}?period1={timestamp}&period2={today}&interval={frequency}&events=history&includeAdjustedClose=true')
             if response.status_code == 200:
-                print('Successfully pulled data')
+                if not(supress):
+                    print('Successfully pulled data')
             else:
                 print(f'No response returned, status code: {response.status_code}')
         except:
@@ -142,12 +146,12 @@ def getHistoricalData(ticker,frequency,yrs,*supress):
         time_string = f'{date.today().day}/{date.today().month}/{date.today().year - yrs}'
         timestamp = date2number(time_string,'dmy')
         if date2number(df["Date"][0],'%Y-%m-%d') > timestamp:
-            x = input('Would you like to update [y/n]: ')
-            if x == 'y'or x == 'Y' or x == 'yes':
-                response = pullData(ticker,frequency,yrs)
-                f = open(f'stock_profiles/{ticker}.csv','w')
-                f.write(response.text)
-                f.close()
+            #x = input('Would you like to update [y/n]: ')
+            #if x == 'y'or x == 'Y' or x == 'yes':
+            response = pullData(ticker,frequency,yrs)
+            f = open(f'stock_profiles/{ticker}.csv','w')
+            f.write(response.text)
+            f.close()
     except:
         response = pullData(ticker,frequency,yrs)
         f = open(f'stock_profiles/{ticker}.csv','w')
@@ -186,3 +190,27 @@ def txt2csv(location,delimiter,output,*noLastLine):
                         df = df.append(pd.Series([data[0]],index=[columns]),ignore_index=True)
         df.to_csv(f'{output}.csv',index=False)
         print(f'Successfully converted {location}.txt to {output}.csv')
+
+def clean_symbols():
+    print('Cleaning symbol list')
+    path = "/mnt/c/Users/apett/Google Drive/Me/Documents/Programming/algorithmic-trading-python/stock_trader/stock_profiles"
+    for filename in os.listdir(path):
+        for char in filename:
+            if char == '$':
+                os.remove(f'stock_profiles/{filename}')
+                print(f'Deleted {filename}')
+                break
+        try:
+            df = pd.read_csv(f'stock_profiles/{filename}')
+            if df.columns[0] != 'Date':
+                os.remove(f'stock_profiles/{filename}')
+                print(f'Deleted {filename}')
+        except:
+            try:
+                f = open(f'stock_profiles/{filename}')
+                os.remove(f'stock_profiles/{filename}')
+                print(f'Deleted {filename}')
+            except:
+                pass
+    else:
+        print('No files needed removing')

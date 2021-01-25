@@ -11,3 +11,5 @@ print(f'The balance of day trader account is {checkBalance("day trader")}')
 
 getHistoricalData('AAPL','1d',3)
 txt2csv('symbol_lists/nasdaqlisted','|','ndaqSymbols')
+
+#clean_symbols()
