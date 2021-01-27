@@ -8,6 +8,11 @@ import csv
 import os
 import alpaca_trade_api as tradeapi
 
+# Environment variables
+os.environ["APCA_API_BASE_URL"] = "https://paper-api.alpaca.markets" 
+paper_api = tradeapi.REST('PKW5BEJ43Z4MAPJQJDO2', '87rBVxc6ovavJU2LAwngQldDgD4c2ykwJx3l4S5S', api_version='v2')
+live_api = tradeapi.REST('PK0Y84UA3R3OW8STP7QG', 'vu3VUtZlQeToIuhGZ6DIIIiPf6Q1YXIGJyb5a9ER', api_version='v2')
+
 def startup():
     # Initiates a balance sheet if none exists and makes sure there is money to trade
     response = ''
@@ -28,23 +33,39 @@ def startup():
                 account = pd.DataFrame([['day trader',0]],columns=['Account','Balance'])
                 account.to_csv('balance.csv',index=False)
                 print('Created new balance.csv')
-    print(account)
+    return account,response
     
+def marketOpen():
+    clock = paper_api.get_clock()
+    return clock.is_open
+
+def wait(*duration):
+    if type(duration) == int:
+        time.sleep(duration)
+        return
+    now = datetime.now()
+    current_time = now.strftime("%H:%M:%S")
+    today = datetime.today().weekday()
+    if today >= 4:
+        hours = ((6-today)*24) + (24-int(current_time[0:2])) + 9
+    else:
+        hours = (23-int(current_time[0:2])) + 9
+    time.sleep(hours*60 + (60-int(current_time[3:5])))
+    open = marketOpen()
+    while not(open):
+        if open:
+            print('Market is open')
+            return
+        time.sleep(60)
+        open = marketOpen()
+
 def accountStatus(type):
     if type == 'paper':
-        os.environ["APCA_API_BASE_URL"] = "https://paper-api.alpaca.markets"
-        #Insert API Credentials 
-        api = tradeapi.REST('PKW5BEJ43Z4MAPJQJDO2', '87rBVxc6ovavJU2LAwngQldDgD4c2ykwJx3l4S5S', api_version='v2')
-        account = api.get_account()
-        return account
+        return paper_api.get_account()
     elif type == 'live':
-        os.environ["APCA_API_BASE_URL"] = "https://api.alpaca.markets"
-        #Insert API Credentials 
-        api = tradeapi.REST('PK0Y84UA3R3OW8STP7QG', 'vu3VUtZlQeToIuhGZ6DIIIiPf6Q1YXIGJyb5a9ER', api_version='v2')
-        account = api.get_account()
-        return account
+        return live_api.get_account() 
     else:
-        print(f'Invalid request for account {account} status')
+        print(f'Invalid request for {type} account status')
 
 def logTrade(time,ticker,buy,sell):
     # Initates a trade log if none exists and logs trades
@@ -59,6 +80,22 @@ def logTrade(time,ticker,buy,sell):
         df = pd.DataFrame([[dt,ticker,buy,sell,sell-buy]],columns=my_columns)
         print('Initialized new trading record')
     df.to_csv('trades.csv',index=False)
+
+def pullIPOs():
+    print('Finding number of IPOs today')
+    try:
+        response = requests.get('https://finance.yahoo.com/calendar/ipo')
+        if response.status_code == 200:
+            print('Successfully pulled list')
+        else:
+            print(f'No response returned, status code: {response.status_code}')
+    except:
+        print(f'Http request failed. Check your connection')
+        return
+    tree = html.fromstring(response.content)
+    num = tree.xpath('//*[@id="fin-cal-events"]/div[2]/ul/li[4]/a/text()')
+    ipos = tree.xpath('//*[@id="cal-res-table"]/div[1]/table/tbody/tr/td[1]/a/text()')
+    return [num[0],ipos]
 
 def webScrap_list(type):
     # pulls lists of stocks from yahoo 
