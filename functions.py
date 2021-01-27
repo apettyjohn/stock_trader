@@ -6,20 +6,45 @@ from lxml import html
 import requests
 import csv
 import os
+import alpaca_trade_api as tradeapi
 
 def startup():
     # Initiates a balance sheet if none exists and makes sure there is money to trade
-    try:
-        df = pd.read_csv('balance.csv')
-    except:
-        print('balance.csv does not exist')
-        data = [['day trader',0]]
-        df = pd.DataFrame(data, columns=['Account','Balance'])
-        df.to_csv('balance.csv', index=False)
-        print('Initialized new balance sheet')
-    balance_data = df.to_dict()
-    dt_funds = balance_data['Balance'][0]
-    print(f"Current Balance: ${dt_funds}")
+    response = ''
+    while response != 'live' and response != 'paper':
+        response = input('Paper or live trading: ')
+    if response == 'live':
+        account = accountStatus('live')
+    else:
+        while response != 'local' and response != 'alpaca':
+            response = input('Get balance from local or alpaca: ')
+        if response == 'alpaca':
+            account = accountStatus('paper')
+        else:
+            try:
+                account = pd.read_csv('balance.csv')
+            except:
+                print('balance.csv did not exist')
+                account = pd.DataFrame([['day trader',0]],columns=['Account','Balance'])
+                account.to_csv('balance.csv',index=False)
+                print('Created new balance.csv')
+    print(account)
+    
+def accountStatus(type):
+    if type == 'paper':
+        os.environ["APCA_API_BASE_URL"] = "https://paper-api.alpaca.markets"
+        #Insert API Credentials 
+        api = tradeapi.REST('PKW5BEJ43Z4MAPJQJDO2', '87rBVxc6ovavJU2LAwngQldDgD4c2ykwJx3l4S5S', api_version='v2')
+        account = api.get_account()
+        return account
+    elif type == 'live':
+        os.environ["APCA_API_BASE_URL"] = "https://api.alpaca.markets"
+        #Insert API Credentials 
+        api = tradeapi.REST('PK0Y84UA3R3OW8STP7QG', 'vu3VUtZlQeToIuhGZ6DIIIiPf6Q1YXIGJyb5a9ER', api_version='v2')
+        account = api.get_account()
+        return account
+    else:
+        print(f'Invalid request for account {account} status')
 
 def logTrade(time,ticker,buy,sell):
     # Initates a trade log if none exists and logs trades
