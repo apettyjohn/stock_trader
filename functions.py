@@ -4,39 +4,21 @@ from datetime import date
 import time
 from lxml import html
 import requests
-import csv
 import os
 import alpaca_trade_api as tradeapi
 
-# Environment variables
-os.environ["APCA_API_BASE_URL"] = "https://paper-api.alpaca.markets" 
-paper_api = tradeapi.REST('PKW5BEJ43Z4MAPJQJDO2', '87rBVxc6ovavJU2LAwngQldDgD4c2ykwJx3l4S5S', api_version='v2')
-live_api = tradeapi.REST('PK0Y84UA3R3OW8STP7QG', 'vu3VUtZlQeToIuhGZ6DIIIiPf6Q1YXIGJyb5a9ER', api_version='v2')
-
 def startup():
-    # Initiates a balance sheet if none exists and makes sure there is money to trade
+    account = api.get_account()
+    return account,response
+    
+def tradingType():
     response = ''
     while response != 'live' and response != 'paper':
         response = input('Paper or live trading: ')
-    if response == 'live':
-        account = accountStatus('live')
-    else:
-        while response != 'local' and response != 'alpaca':
-            response = input('Get balance from local or alpaca: ')
-        if response == 'alpaca':
-            account = accountStatus('paper')
-        else:
-            try:
-                account = pd.read_csv('balance.csv')
-            except:
-                print('balance.csv did not exist')
-                account = pd.DataFrame([['day trader',0]],columns=['Account','Balance'])
-                account.to_csv('balance.csv',index=False)
-                print('Created new balance.csv')
-    return account,response
-    
+    return response
+
 def marketOpen():
-    clock = paper_api.get_clock()
+    clock = api.get_clock()
     return clock.is_open
 
 def wait(*duration):
@@ -50,7 +32,9 @@ def wait(*duration):
         hours = ((6-today)*24) + (24-int(current_time[0:2])) + 9
     else:
         hours = (23-int(current_time[0:2])) + 9
-    time.sleep(hours*60 + (60-int(current_time[3:5])))
+    seconds = hours*3600 + (60-int(current_time[3:5]))*60
+    print(f'Going to sleep for {seconds} seconds')
+    time.sleep(seconds)
     open = marketOpen()
     while not(open):
         if open:
@@ -58,28 +42,6 @@ def wait(*duration):
             return
         time.sleep(60)
         open = marketOpen()
-
-def accountStatus(type):
-    if type == 'paper':
-        return paper_api.get_account()
-    elif type == 'live':
-        return live_api.get_account() 
-    else:
-        print(f'Invalid request for {type} account status')
-
-def logTrade(time,ticker,buy,sell):
-    # Initates a trade log if none exists and logs trades
-    my_columns = ['Time','Ticker','Buy','Sell','Net']
-    dt = datetime.fromtimestamp(time)
-    try:
-        df = pd.read_csv('trades.csv')
-        df = df.append(pd.Series([dt,ticker,buy,sell,sell-buy],index=my_columns),ignore_index=True)
-    except:
-        print('trades.csv does not exist')
-        file = open('trades.csv',"x")
-        df = pd.DataFrame([[dt,ticker,buy,sell,sell-buy]],columns=my_columns)
-        print('Initialized new trading record')
-    df.to_csv('trades.csv',index=False)
 
 def pullIPOs():
     print('Finding number of IPOs today')
@@ -119,106 +81,64 @@ def webScrap_list(type):
     volume = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[6]/span/text()')
     mkt_cap = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[8]/span/text()')
 
-    my_columns = ['Symbols','Full Name','Price','Change','% Change','Volume','Market Cap']
     fields = [symbols,full_name,price,change,percent_change,volume,mkt_cap]
     data = list(range(len(fields)))
+    array = [type]
     for n in list(range(len(symbols))):
         for i in list(range(len(fields))):
             field = fields[i]
             data[i] = field[n]
-        try:
-            df = df.append(pd.Series(data,index=my_columns),ignore_index=True)
-        except:
-            df = pd.DataFrame([data],columns=my_columns)
+            if i == len(fields)-1:
+                array.append(data)
+    return array
 
-    df.to_csv(f'{type}.csv',index=False)
-
-def checkBalance(Account):
-    # Reads the balance of the input account from balance.csv
-    df = pd.read_csv('balance.csv')
-    data = df.to_dict()
-    accounts = data['Account']
-    for n in list(range(len(accounts))):
-        if accounts[n] == Account:
-            return data['Balance'][n]
-    return 'NaN'
-
-def updateBalance(Account,change):
-    # modifies the balance of the input account in balance.csv by the input change
-    old_balance = checkBalance(Account)
-    if old_balance == 'NaN':
-        print(f'Could not update the balance of {Account}')
-        return
-    df = pd.DataFrame([[Account,old_balance + change]], columns=['Account','Balance'])
-    balance_sheet = pd.read_csv('balance.csv')
-    data = balance_sheet.to_dict()
-    accounts = data['Account']
-    for n in list(range(len(accounts))):
-        if accounts[n] != Account:
-            df = df.append(pd.Series([accounts[n]],data['Balance'][n],index=['Account','Balance']),ignore_index=True)
-    df.to_csv('balance.csv', index=False)
-
-def date2number(string,date):
-    if date == 'dmy':
-        format = "%d/%m/%Y"
-    elif date == 'dym':
-        format = "%d/%Y/%m"
-    elif date == 'mdy':
-        format = "%m/%d/%Y"
-    elif date == 'myd':
-        format = "%m/%Y/%d"
-    elif date == 'ymd':
-        format = "%Y/%m/%d"
-    elif date == 'ydm':
-        format = "%Y/%d/%m"
-    else:
-        #print('Noticed custom date format')
-        format = date
+def getHistoricalData(ticker,frequency,days):
+    # Pull data from API
+    data = api.get_barset(ticker,frequency,limit=days)[ticker]
+    # check if folders exist
     try:
-        timestamp = int(time.mktime(datetime.strptime(string,format).timetuple()))
-    except:
-        print('Date could not be converted to a number')
-        return
-    return timestamp
-
-def getHistoricalData(ticker,frequency,yrs,*supress):
-
-    def pullData(ticker,frequency,yrs,*supress):
-        if not(supress==True or supress==False):
-            supress = False
-        time_string = f'{date.today().day}/{date.today().month}/{date.today().year - yrs}'
-        timestamp = date2number(time_string,'dmy')
-        today = date2number(f'{date.today().day}/{date.today().month}/{date.today().year}',"dmy")
-        try:
-            print(f'Get: request initiated for {ticker} data every {frequency} for {yrs} years')
-            response = requests.get(f'https://query1.finance.yahoo.com/v7/finance/download/{ticker}?period1={timestamp}&period2={today}&interval={frequency}&events=history&includeAdjustedClose=true')
-            if response.status_code == 200:
-                if not(supress):
-                    print('Successfully pulled data')
-            else:
-                print(f'No response returned, status code: {response.status_code}')
-        except:
-            print(f'Http request failed. Check your connection')
-            return 
-        return response
-
+        files = os.listdir('stock_profiles/')
+        for folder in ['historical','hour','minute','second']:
+            if folder not in files:
+                os.mkdir(f'stock_profiles/{folder}')
+    except FileNotFoundError:
+        os.mkdir('stock_profiles/')
+        for folder in ['historical','hour','minute','second']:
+            os.mkdir(f'stock_profiles/{folder}')
+    # check if csv exists for input ticker
     try:
-        df = pd.read_csv(f'stock_profiles/{ticker}.csv')
-        print(f'Data already exists for stock {ticker} from {df["Date"][0]} through {df["Date"][len(df["Date"])-1]}')
-        time_string = f'{date.today().day}/{date.today().month}/{date.today().year - yrs}'
-        timestamp = date2number(time_string,'dmy')
-        if date2number(df["Date"][0],'%Y-%m-%d') > timestamp:
-            #x = input('Would you like to update [y/n]: ')
-            #if x == 'y'or x == 'Y' or x == 'yes':
-            response = pullData(ticker,frequency,yrs)
-            f = open(f'stock_profiles/{ticker}.csv','w')
-            f.write(response.text)
-            f.close()
-    except:
-        response = pullData(ticker,frequency,yrs)
-        f = open(f'stock_profiles/{ticker}.csv','w')
-        f.write(response.text)
-        f.close()
+        df = pd.read_csv(f'stock_profiles/historical/{ticker}.csv')
+        # remove adj close column if it exists
+        try:
+            df = df.drop(columns=['Adj Close'])
+        except KeyError:
+            pass
+        # check if data is up to date
+        if switchDate(df['Date'][0]) > data[0].t:
+            n = -1
+            new = []
+            for i in range(days).reverse():
+                if data[i] < switchDate(df['Date'][0]):
+                    df.loc[n] = pd.Series([switchDate(data[i].t),data[i].o,data[i].h,data[i].l,data[i].c,data[i].v])
+                    n = n-1
+                if data[i] > switchDate(df['Date'][len(df['Date'])-1]):
+                    new.append = [switchDate(data[i].t),data[i].o,data[i].h,data[i].l,data[i].c,data[i].v]
+            df.index = df.index + (-1*(n+1))
+            if len(new) > 0:
+                for row in new.reverse():
+                    df = df.append(pd.Series(row,index=[df.columns]),ignore_index=True)
+    except FileNotFoundError: 
+        df = pd.DataFrame([[switchDate(data[i].t),data[i].o,data[i].h,data[i].l,data[i].c,data[i].v]],columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        for bar in data:
+            df = df.append(pd.Series([switchDate(bar.t),bar.o,bar.h,bar.l,bar.c,bar.v],index=[df.columns]),ignore_index=True)
+        df.to_csv(f'stock_profiles/historical/{ticker}.csv')
+    return 'Success'
+
+def switchDate(s):
+    if type(s) == str:
+        return time.mktime(datetime.datetime.strptime(s, "%m/%d/%Y").timetuple())
+    elif type(s) == int:
+        return datetime.fromtimestamp(s).strftime('%-m/%-d/%Y %H:%M:%S')[0:9]
 
 def txt2csv(location,delimiter,output,*noLastLine):
     try:
@@ -255,7 +175,10 @@ def txt2csv(location,delimiter,output,*noLastLine):
 
 def clean_symbols():
     print('Cleaning symbol list')
+    
+    # This is a terrrible idea to hardcode the path into the function
     path = "/mnt/c/Users/apett/Google Drive/Me/Documents/Programming/algorithmic-trading-python/stock_trader/stock_profiles"
+    
     for filename in os.listdir(path):
         for char in filename:
             if char == '$':
@@ -276,3 +199,15 @@ def clean_symbols():
                 pass
     else:
         print('No files needed removing')
+
+# Environment variables
+response = tradingType()
+paper_key = ['PKKMPLCD1NJ4PBQRDIN1', 'rsWKwPZt1RDTpPwvIEd3Z84Kp4bf7FJDa1ZEM63S']
+live_key = ['AKRF2GZWS2CLQSOK5KV9', 'vu3VUtZlQeToIuhGZ6DIIIiPf6Q1YXIGJyb5a9ER']
+if response == 'live':
+    os.environ["APCA_API_BASE_URL"] = "https://api.alpaca.markets"
+    api = tradeapi.REST(live_key[0], live_key[1], api_version='v2')
+else:
+    os.environ["APCA_API_BASE_URL"] = "https://paper-api.alpaca.markets" 
+    api = tradeapi.REST(paper_key[0], paper_key[1], api_version='v2')
+rate_limit = 200
