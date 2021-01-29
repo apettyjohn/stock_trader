@@ -2,3 +2,5 @@
 stock_profiles/
 symbol_lists/
 __pycache__/
+.vscode/
+api_keys.py

@@ -2,15 +2,12 @@ import pandas as pd
 from datetime import datetime
 import os,time,requests,json
 import alpaca_trade_api as tradeapi
+from api_keys import *
+from trade import response
 
 # Environment variables
-PAPER_API_KEY = 'PKS5DDOD4FZ0CJ9NMI0I'
-PAPER_API_SECRET_KEY = 'omjVk7zs520TS2ONT8twl4ayfo3ltuH1lnj4nGfY'
-LIVE_API_KEY = 'AKRF2GZWS2CLQSOK5KV9'
-LIVE_API_SECRET_KEY = 'vu3VUtZlQeToIuhGZ6DIIIiPf6Q1YXIGJyb5a9ER'
 rate_limit = 200
 
-response = response = input('Paper or live trading: ')
 if response == 'live':
     BASE_URL = "https://api.alpaca.markets"
     HEADERS = {'APCA-API-KEY-ID':LIVE_API_KEY,'APCA-API-SECRET-KEY':LIVE_API_SECRET_KEY}
