@@ -5,10 +5,9 @@ import requests, os, time
 
 
 def wait(*duration):
-    # FIXME: account for timezone changes
-
     # if a number is entered then wait that long and quit
     if type(duration) == int:
+        print(f'Waiting for {duration}')
         time.sleep(duration)
         return
     # otherwise wait until 9am on a weekday
@@ -119,17 +118,11 @@ def clean_symbols():
         try:
             df = pd.read_csv(os.path.join(path,filename))
             # if it's not formatted properly remove it
-            if df.columns[0] != 'Date':
+            if df.columns[0] != 'open':
                 os.remove(os.path.join(path,filename))
                 print(f'Deleted {filename}')
         except:
-            try:
-                # if the file exists but can't be read by pandas remove it
-                f = open(os.path.join(path,filename))
-                os.remove(os.path.join(path,filename))
-                print(f'Deleted {filename}')
-            except:
-                pass
+            pass
     else:
         print('No files needed removing')
 

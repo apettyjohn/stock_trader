@@ -1,14 +1,7 @@
 import websocket,json
 from api_keys import *
-from trade import response
 
 BASE_URL = 'wss://data.alpaca.markets/stream'
-if response == 'live':
-    API_KEY = LIVE_API_KEY
-    API_SECRET_KEY = LIVE_API_SECRET_KEY
-else:
-    API_KEY = PAPER_API_KEY
-    API_SECRET_KEY = PAPER_API_SECRET_KEY
 streams = []
 
 # Functions for making a socket

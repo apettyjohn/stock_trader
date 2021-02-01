@@ -1,23 +1,17 @@
+from logging import error
 import pandas as pd
 from datetime import datetime
 import os,time,requests,json
 import alpaca_trade_api as tradeapi
 from api_keys import *
-from trade import response
 
 # Environment variables
 rate_limit = 200
 
-if response == 'live':
-    BASE_URL = "https://api.alpaca.markets"
-    HEADERS = {'APCA-API-KEY-ID':LIVE_API_KEY,'APCA-API-SECRET-KEY':LIVE_API_SECRET_KEY}
-    api = tradeapi.REST(LIVE_API_KEY, LIVE_API_SECRET_KEY, api_version='v2')
-elif response == 'paper':
-    BASE_URL = "https://paper-api.alpaca.markets" 
-    HEADERS = {'APCA-API-KEY-ID':PAPER_API_KEY,'APCA-API-SECRET-KEY':PAPER_API_SECRET_KEY}
-    api = tradeapi.REST(PAPER_API_KEY, PAPER_API_SECRET_KEY, api_version='v2')
-else:
-    raise KeyError
+#BASE_URL = "https://api.alpaca.markets" #--live account url
+BASE_URL = "https://paper-api.alpaca.markets" # --paper account url
+HEADERS = {'APCA-API-KEY-ID':API_KEY,'APCA-API-SECRET-KEY':API_SECRET_KEY}
+api = tradeapi.REST(API_KEY, API_SECRET_KEY, api_version='v2')
 
 ACCOUNT_URL = "{}/v2/account".format(BASE_URL)
 ORDERS_URL = '{}/v2/orders'.format(BASE_URL)
@@ -44,12 +38,12 @@ def portfolioHistory(parameters):
     # timeframe - The resolution of time window. 1Min, 5Min, 15Min, 1H, or 1D
     # date_end - in “YYYY-MM-DD” format. Default is current day
     # extended_hours - bool, timeframe must be < 1D
-    r = requests.get(ACCOUNT_URL + '/portfolio/history',headers=HEADERS)
+    r = requests.get(ACCOUNT_URL + '/portfolio/history',json=parameters,headers=HEADERS)
     return json.loads(r.content)
 
 # Order Functions
-def getOrder(id):
-    if id == 'all':
+def getOrder(*id):
+    if type(id) == None:
         r = requests.get(ORDERS_URL,headers=HEADERS)
     else:
         r = requests.get(ORDERS_URL + '/{}'.format(id),headers=HEADERS)
@@ -77,11 +71,11 @@ def deleteOrder(id):
         r = requests.delete(ORDERS_URL,headers=HEADERS)
     else:
         r = requests.delete(ORDERS_URL + f'/{id}',headers=HEADERS)
-    return json.loads(r.content)
+    return (r.content)
 
 # Position Functions
-def getPosition(id):
-    if id == 'all':
+def getPosition(*id):
+    if type(id) == None:
         r = requests.get(POSITIONS_URL,headers=HEADERS)
     else:
         r = requests.get(POSITIONS_URL + '/{}'.format(id),headers=HEADERS)
@@ -104,8 +98,8 @@ def getAsset(id):
     return json.loads(r.content)
 
 # Watchlist Functions
-def getWatchlist(id):
-    if id == 'all':
+def getWatchlist(*id):
+    if type(id) == None:
         r = requests.get(WATCHLIST_URL,headers=HEADERS)
     else:
         r = requests.get(WATCHLIST_URL + '/{}'.format(id),headers=HEADERS)
@@ -127,26 +121,25 @@ def removeWatchlistSymbol(id,symbol):
     return json.loads(r.content)
 def deleteWatchlist(id):
     r = requests.delete(WATCHLIST_URL + f'/{id}',headers=HEADERS)
-    return json.loads(r.content)
+    return (r.content)
 
 # Calendar Functions
-def getCalendar(start_date,end_date):
-    # dates must be in "%Y-%m-%d" format
-    r = requests.get(CALENDAR_URL,json={'start':start_date,'end':end_date},headers=HEADERS)
-    return json.loads(r.content)
+def getCalendar(start_date='',end_date=''):
+    if start_date and end_date:
+        print(start_date,end_date)
+        # dates must be in "%Y-%m-%d" format
+        r = api.get_calendar(start=start_date,end=end_date)
+    else:
+        r = api.get_calendar()
+    return r
 
 # Clock Functions
-def marketOpen():
-    r = requests.get(CLOCK_URL,headers=HEADERS)
-    return json.loads(r.content)['is_open']
 def getClock():
     r = requests.get(CLOCK_URL,headers=HEADERS)
     return json.loads(r.content)
 
 # Other Functions
 def getHistoricalData(ticker,frequency,days):
-    # Pull data from API
-    data = api.get_barset(ticker,frequency,limit=days)[ticker]
     # check if folders exist
     try:
         files = os.listdir('stock_profiles/')
@@ -157,41 +150,43 @@ def getHistoricalData(ticker,frequency,days):
         os.mkdir('stock_profiles/')
         for folder in ['historical','hour','minute','second']:
             os.mkdir(f'stock_profiles/{folder}')
-    # check if csv exists for input ticker
+    # add the data to a dataframe
     try:
         df = pd.read_csv(f'stock_profiles/historical/{ticker}.csv')
-        # remove adj close column if it exists
+        # compares current date with last date of stock data
+        if compareDates(datetime.now().strftime('%Y-%m-%d'),df.loc[len(df.index)-1][3]):
+            return (f'{ticker}.csv is up to date')
+        else:
+            raise ValueError
+    except:
+        # Pull data from API
+        data = api.get_barset(ticker,frequency,limit=days).df[f'{ticker}']
         try:
-            df = df.drop(columns=['Adj Close'])
-        except KeyError:
+            df = pd.DataFrame([[data['open'][0],data['high'][0],data['low'][0],data['close'][0],data['volume'][0]]],columns=['open','high','low','close','volume'])
+            for n in range(1,len(data.index)):
+                df = df.append(pd.Series([data['open'][n],data['high'][n],data['low'][n],data['close'][n],data['volume'][n]],index=df.columns),ignore_index=True)
+            df.loc[-1] = ['From',f'{data.index[0]}','To',f'{data.index[len(data.index)-1]}','-']
+            df.index.sort_values()
+            # Save dataframe to a csv file
+            df.to_csv(f'stock_profiles/historical/{ticker}.csv',index=False)
+            return (f'Successfully got data for {ticker}')
+        except:
+            return (f'Couldn"t find data for {ticker}')
+
+def compareDates(date1,date2):
+    # standardize dates
+    formats = ['%Y-%m-%d','%Y/%m/%d','%m-%d-%Y','%m/%d/%Y']
+    for format in formats:
+        try:
+            date1 = datetime.timestamp(datetime.strptime(date1,''))
+            print('date1 converted')
+        except:
             pass
-        # check if data is up to date
-        if switchDate(df['Date'][0]) > data[0].t:
-            n = -1
-            new = []
-            for i in range(days).reverse():
-                # if new data is older than saved data
-                if data[i] < switchDate(df['Date'][0]):
-                    df.loc[n] = pd.Series([switchDate(data[i].t),data[i].o,data[i].h,data[i].l,data[i].c,data[i].v])
-                    n = n-1
-                # if new data is newer than saved data
-                if data[i] > switchDate(df['Date'][len(df['Date'])-1]):
-                    new.append = [switchDate(data[i].t),data[i].o,data[i].h,data[i].l,data[i].c,data[i].v]
-            df.index = df.index + (-1*(n+1))
-            df = df.sort_index()
-            if len(new) > 0:
-                for row in new.reverse():
-                    df = df.append(pd.Series(row,index=[df.columns]),ignore_index=True)
-    except FileNotFoundError: 
-        df = pd.DataFrame([[switchDate(data[0].t),data[0].o,data[0].h,data[0].l,data[0].c,data[0].v]],columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        for bar in data:
-            df = df.append(pd.Series([switchDate(bar.t),bar.o,bar.h,bar.l,bar.c,bar.v],index=[df.columns]),ignore_index=True)
-    # Save dataframe to a csv file
-    df.to_csv(f'stock_profiles/historical/{ticker}.csv')
-    return f'Successfully got data for {ticker}'
-def switchDate(s):
-    # converts between integer and string date formats
-    if type(s) == str:
-        return time.mktime(datetime.datetime.strptime(s, "%m/%d/%Y").timetuple())
-    elif type(s) == int:
-        return datetime.fromtimestamp(s).strftime('%-m/%-d/%Y %H:%M:%S')[0:9]
+        try:
+            date2 = datetime.timestamp(datetime.strptime(date1,''))
+            print('date2 converted')
+        except:
+            pass
+    # returns the newest date by comparing day month and year
+    # assumes year-month-day format
+    return (date1 > date2)
