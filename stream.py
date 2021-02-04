@@ -1,8 +1,10 @@
-import websocket,json
+import websocket
+import json
 from api_keys import *
 
 BASE_URL = 'wss://data.alpaca.markets/stream'
 streams = []
+ws = None
 
 # Functions for making a socket
 def on_open(ws):
@@ -13,31 +15,32 @@ def on_open(ws):
     }
     ws.send(json.dumps(auth_data))
 
-def on_message(message):
+def on_message(ws,message):
     print('Recieved a mesage: ',message)
-    if message['stream'] == 'listening':
-        streams = message['data']['streams']
 
-def on_error(error):
+def on_error(ws,error):
     print('Recieved an error: ',error)
 
 def on_close(ws):
     print('Closing Socket')
 
 def newSocket():
-    ws = websocket.WebSocketApp(BASE_URL,on_open=on_open,on_close=on_close,on_error=on_error,on_message=on_message,)
+    global ws
+    ws = websocket.WebSocketApp(BASE_URL,on_open=on_open,on_close=on_close,on_error=on_error,on_message=on_message)
     ws.run_forever()
+
+def getSocket():
     return ws
 
 # Functions for modifying the active socket
 def newStream(ws,channels):
-    for channel in channels:
-        streams.append(channel)
+    streams.append(f'Q.{channels}')
     listen_data = {
     "action": "listen",
     "data": {"streams": streams}
     }
     ws.send(json.dumps(listen_data))
+    return streams
 
 def removeStream(ws,channels):
     for channel in channels:

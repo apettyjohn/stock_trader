@@ -1,7 +1,8 @@
 from alpaca_trade_api.entity import Watchlist
 import pandas as pd
-import requests, os, time,math
+import requests, time
 from datetime import date, datetime
+from requests.auth import HTTPBasicAuth 
 from lxml import html
 from alpaca import api
 from tqdm import tqdm 
@@ -84,44 +85,38 @@ def pullSymbols():
     print('Getting a list of symbols')
     allSymbols = []
     max_price = 10.0
-    r = requests.get(f'https://www.marketwatch.com/tools/stockresearch/screener/results.asp?TradesShareEnable=True&TradesShareMin=0&TradesShareMax={int(max_price)}&PriceDirEnable=False&PriceDir=Up&LastYearEnable=False&TradeVolEnable=False&BlockEnable=False&PERatioEnable=False&MktCapEnable=False&MovAvgEnable=False&MovAvgType=Outperform&MovAvgTime=FiftyDay&MktIdxEnable=False&MktIdxType=Outperform&Exchange=All&IndustryEnable=False&Industry=Tobacco&Symbol=True&CompanyName=True&Price=True&Change=True&ChangePct=True&Volume=True&LastTradeTime=False&FiftyTwoWeekHigh=False&FiftyTwoWeekLow=False&PERatio=False&MarketCap=False&MoreInfo=True&SortyBy=Symbol&SortDirection=Ascending&ResultsPerPage=OneHundred&PagingIndex=0')
+    headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.104 Safari/537.36'}
+    r = requests.get(f'https://finviz.com/screener.ashx?v=152&f=geo_usa,sh_opt_short,sh_price_u{int(max_price)}&r=0&c=0,1,5,6,49,50,51,52,65,66,67',headers=headers)
     tree = html.fromstring(r.content)
-    page = tree.xpath('//*[@id="stockscreener"]/div[3]/div[1]/text()')[0].split(' ')
-    pages = 0
-    # get the page number out of a string
-    for n in range(len(page)):
-        if page[n] == 'of':
-            pages = math.floor(float(page[n+1])/100)
-            break
+    pages = int(tree.xpath('//*[@id="screener-content"]/table/tr[7]/td/a[12]/text()')[0])
     # pull data from each page
-    for n in tqdm (range (1,pages), desc="Loading..."):
-        #print(f'Parsing page: {n}')
+    for n in tqdm (range(0,pages), desc="Loading..."):
         if n != 1:
-            r = requests.get(f'https://www.marketwatch.com/tools/stockresearch/screener/results.asp?TradesShareEnable=True&TradesShareMin=0&TradesShareMax={int(max_price)}&PriceDirEnable=False&PriceDir=Up&LastYearEnable=False&TradeVolEnable=False&BlockEnable=False&PERatioEnable=False&MktCapEnable=False&MovAvgEnable=False&MovAvgType=Outperform&MovAvgTime=FiftyDay&MktIdxEnable=False&MktIdxType=Outperform&Exchange=All&IndustryEnable=False&Industry=Tobacco&Symbol=True&CompanyName=True&Price=True&Change=True&ChangePct=True&Volume=True&LastTradeTime=False&FiftyTwoWeekHigh=False&FiftyTwoWeekLow=False&PERatio=False&MarketCap=False&MoreInfo=True&SortyBy=Symbol&SortDirection=Ascending&ResultsPerPage=OneHundred&PagingIndex={n*100}')
+            r = requests.get(f'https://finviz.com/screener.ashx?v=152&f=geo_usa,sh_opt_short,sh_price_u{int(max_price)}&r={n*20}&c=0,1,5,6,49,50,51,52,65,66,67',headers=headers)
             tree = html.fromstring(r.content)
-        symbols = tree.xpath('//*[@id="stockscreener"]/div[5]/table/tbody/tr/td[1]/a/text()')
-        prices = tree.xpath('//*[@id="stockscreener"]/div[5]/table/tbody/tr/td[3]/text()') # type=float
-        change = tree.xpath('//*[@id="stockscreener"]/div[5]/table/tbody/tr/td[5]/text()') # type=float
-        volume = tree.xpath('//*[@id="stockscreener"]/div[5]/table/tbody/tr/td[6]/text()') # type=float
+        symbols = tree.xpath('//*[@id="screener-content"]/table/tr[4]/td/table/tr/td[2]/a/text()')
+        prices = tree.xpath('//*[@id="screener-content"]/table/tr[4]/td/table/tr/td[9]/a/span/text()')
+        change = tree.xpath('//*[@id="screener-content"]/table/tr[4]/td/table/tr/td[10]/a/span/text()')
+        volume = tree.xpath('//*[@id="screener-content"]/table/tr[4]/td/table/tr/td[11]/a/text()')
+        atr = tree.xpath('///*[@id="screener-content"]/table/tr[4]/td/table/tr/td[5]/a/text()')
         # fix volume data
         for i in range(len(volume)):
             if ',' in volume[i]:
                 volume[i] = float(volume[i].replace(',',''))
-            elif '.' in volume[i]:
-                volume[i] = float(volume[i][0:-1].replace('.',''))*1000000.0
         # fix % change data
         for i in range(len(change)):
-            change[i] = float(change[i][1:-1])
+            change[i] = float(change[i][0:-1])
         # fix prices data
         for i in range(len(prices)):
-            if ',' in prices[i]:
-                prices[i] = prices[i].replace(',','')
             prices[i] = float(prices[i])
+        # fix atr data
+        for i in range(len(atr)):
+            atr[i] = float(atr[i])
         # only add data if it's affordable
-        for i in range(len(symbols)):
+        for i in range(len(prices)):
             if prices[i] < max_price:
-                allSymbols.append([symbols[i],prices[i],change[i],volume[i]])
-    df = pd.DataFrame(allSymbols,columns=['Symbol','Price','% Change','Volume'])
+                allSymbols.append([symbols[i],prices[i],atr[i],change[i],volume[i]])
+    df = pd.DataFrame(allSymbols,columns=['Symbol','Price','ATR','% Change','Volume'])
     df.to_csv('allSymbols.csv',index=False)
     print('Successfully saved symbol list')
     print(f'Found {len(allSymbols)} symbols')
@@ -153,19 +148,18 @@ def sort_stocks():
     # Variables
     print('Sorting stocks')
     watchlist = []
-    watchlist_max_length = 50
+    watchlist_max_length = 30
     now = datetime.now()
     start = pd.Timestamp(year = now.year,month = now.month,day = now.day-1,hour = 9, tz = 'US/Eastern').isoformat()
-    print(start)
     # checking every symbol
     df1 = pd.read_csv('allSymbols.csv')
-    df1.sort_values(by=['% Change'],inplace=True,ascending=False)
+    df1.sort_values(by=['ATR'],inplace=True,ascending=False)
     # saving only the top max_length ammount
     print('Saving the watchlist')
     for n in df1.index[0:watchlist_max_length]:
         data = api.get_barset(df1['Symbol'][n],'1Min',start=start).df
         if len(data.index) > 30:
-            watchlist.append([df1['Symbol'][n],df1['Price'][n],df1['% Change'][n],df1['Volume'][n]])
+            watchlist.append([df1['Symbol'][n],df1['Price'][n],df1['ATR'][n],df1['% Change'][n],df1['Volume'][n]])
             stock = minuteData(df1['Symbol'][n],data)
             minObjs(stock,'a')
         else:

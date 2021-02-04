@@ -1,8 +1,10 @@
+import sys,threading
 from config import *
 from alpaca import *
-from streaming import *
-import sys
+from stream import *
 import matplotlib.pyplot as plot
+
+stremas = []
 
 def wait2Market():
     while True:
@@ -23,11 +25,16 @@ elif float(account['portfolio_value']) <= 0:
     print('Account balance too low to trade')
     sys.exit()
 
-#pullSymbols()
+pullSymbols()
 sort_stocks()
-minData = minObjs()[10]
-line = minData.df
-minData.df.index = range(minData.timeframe)
-line.plot.line(title=f'Minute data for {minData.ticker}',y='close')
-plot.show(block=True)
+minData = minObjs()
 #wait2Market()
+t1 = threading.Thread(target=newSocket)
+t1.start()
+time.sleep(1)
+print('passed thread')
+ws = getSocket()
+# for stock in minData[0:2]:
+#     print(stock.ticker)
+#     streams = newStream(ws,stock.ticker)
+# print(streams)
