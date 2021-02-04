@@ -23,20 +23,8 @@ elif float(account['portfolio_value']) <= 0:
     print('Account balance too low to trade')
     sys.exit()
 
+pullSymbols()
+sort_stocks()
+
 # Wait until market is open
-while True:
-    #wait2Market()
-    ipos = pullIPOs()
-    print(f'There are {ipos[0]} new IPOs today')
-    # Update historical Data
-    # symbols = os.listdir('stock_profiles/historical')
-    # if symbols:
-    #     for file in os.listdir('stock_profiles/historical/'):
-    #         ticker = file[0:-4]
-    #         print(getHistoricalData(ticker,'day',50))
-    # else:
-    #     for ticker in pd.read_csv('ndaqSymbols.csv'):
-    #         print(getHistoricalData(ticker,'day',50))
-    #     for ticker in pd.read_csv('otherSymbols.csv'):
-    #         print(getHistoricalData(ticker,'day',50))
-    break
+#wait2Market()
