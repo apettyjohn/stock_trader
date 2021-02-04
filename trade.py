@@ -1,8 +1,8 @@
 from config import *
 from alpaca import *
 from streaming import *
-import sys,os
-import pandas as pd
+import sys
+import matplotlib.pyplot as plot
 
 def wait2Market():
     while True:
@@ -23,8 +23,11 @@ elif float(account['portfolio_value']) <= 0:
     print('Account balance too low to trade')
     sys.exit()
 
-pullSymbols()
+#pullSymbols()
 sort_stocks()
-
-# Wait until market is open
+minData = minObjs()[10]
+line = minData.df
+minData.df.index = range(minData.timeframe)
+line.plot.line(title=f'Minute data for {minData.ticker}',y='close')
+plot.show(block=True)
 #wait2Market()

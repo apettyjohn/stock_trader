@@ -1,10 +1,12 @@
 from alpaca_trade_api.entity import Watchlist
 import pandas as pd
 import requests, os, time,math
-from datetime import datetime
+from datetime import date, datetime
 from lxml import html
 from alpaca import api
 from tqdm import tqdm 
+
+minStocks = []
 
 # Foundation Functions
 def wait(*duration):
@@ -124,7 +126,6 @@ def pullSymbols():
     print('Successfully saved symbol list')
     print(f'Found {len(allSymbols)} symbols')
 
-# Trading Strategy Functions
 def avg_volume(df):
     timeframe = 14
     last_loc = len(df.index)-1
@@ -153,15 +154,22 @@ def sort_stocks():
     print('Sorting stocks')
     watchlist = []
     watchlist_max_length = 50
-    #timeframe = 50
-    #df = getHistoricalData(symbol,'day',timeframe)
+    now = datetime.now()
+    start = pd.Timestamp(year = now.year,month = now.month,day = now.day-1,hour = 9, tz = 'US/Eastern').isoformat()
+    print(start)
     # checking every symbol
     df1 = pd.read_csv('allSymbols.csv')
     df1.sort_values(by=['% Change'],inplace=True,ascending=False)
     # saving only the top max_length ammount
     print('Saving the watchlist')
     for n in df1.index[0:watchlist_max_length]:
-        watchlist.append([df1['Symbol'][n],df1['Price'][n],df1['% Change'][n],df1['Volume'][n]])
+        data = api.get_barset(df1['Symbol'][n],'1Min',start=start).df
+        if len(data.index) > 30:
+            watchlist.append([df1['Symbol'][n],df1['Price'][n],df1['% Change'][n],df1['Volume'][n]])
+            stock = minuteData(df1['Symbol'][n],data)
+            minObjs(stock,'a')
+        else:
+            watchlist_max_length += 1
     df2 = pd.DataFrame(watchlist,columns=df1.columns)
     df2.to_csv('watchlist.csv',index=False)
     print('Successfully created watchlist')
@@ -179,62 +187,19 @@ def getHistoricalData(ticker,frequency,days):
     except:
         return (f'Couldn"t find data for {ticker}')
 
-#def compareDates(date1,date2):
-    # standardize dates
-    formats = ['%Y-%m-%d','%Y/%m/%d','%m-%d-%Y','%m/%d/%Y']
-    for format in formats:
-        try:
-            date1 = datetime.timestamp(datetime.strptime(date1,''))
-            print('date1 converted')
-        except:
-            pass
-        try:
-            date2 = datetime.timestamp(datetime.strptime(date1,''))
-            print('date2 converted')
-        except:
-            pass
-    # returns the newest date by comparing day month and year
-    # assumes year-month-day format
-    return (date1 > date2)
+class minuteData:
+    def __init__(self,ticker,df):
+        self.ticker = ticker
+        self.df = df[self.ticker]
+        self.timeframe = len(df.index)
 
-#def txt2csv(location,delimiter,output):
-    # turns the nasdaq text lists into a csv of trading symbols
-    def testSymbol(data):
-        # tests if the ticker is a common stock
-        return 'Common Stock' in data[1]
-    
-    print('Pulling text lists')
-    file = open(f'{location}.txt','r')
-    lines = file.readlines()
-    columns = []
-    print('Beginning txt to csv conversion')
-    columns = lines[0].split(f'{delimiter}')[0]
-    symbols = []
-    # make dataframe
-    for n in range(1,len(lines)):
-        line = lines[n]
-        data = line.split(f'{delimiter}')
-        # save rows as data series
-        if n == len(lines)-1:
-            file = open(f'{output}.csv',"w")
-            break
-        else:
-            if testSymbol(data):
-                symbols.append([data[0]])
-    df = pd.DataFrame(symbols,columns=[columns])
-    df.to_csv(f'{output}.csv',index=False)
-    print(f'Successfully converted {location}.txt to {output}.csv')
-
-#def clean_symbols(file):
-    # removes garbage data from stock_profiles folder
-    print(f'Cleaning symbol list from {file}')
-    df = pd.read_csv(file)
-    for symbol in df[df.columns[0]]:
-        for char in symbol:
-            # if there is a bad symbol, remove it
-            if char == '$' or char == '.' or char == ' ':
-                df = df.drop(index=df[df[df.columns[0]]==symbol].index[0])
-                #print(f'Deleted {symbol}')
-                break
-    df.to_csv(file,index=False)
-    print('Successful clean')
+def minObjs(obj=None,args=''):
+    global minStocks
+    if not(args):
+        return minStocks
+    else:
+        if args == 'a':
+            minStocks.append(obj)
+        elif args == 'r':
+            minStocks.remove(obj)
+# Trading Strategy Functions
