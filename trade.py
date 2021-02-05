@@ -2,7 +2,6 @@ import sys,threading
 from config import *
 from alpaca import *
 from stream import *
-import matplotlib.pyplot as plot
 
 stremas = []
 
@@ -15,6 +14,7 @@ def wait2Market():
         else:
             print('Market is closed')
             wait()
+            return
 
 # Check account status and balance
 account = checkAccount()
@@ -27,12 +27,12 @@ elif float(account['portfolio_value']) <= 0:
 
 pullSymbols()
 sort_stocks()
-minData = minObjs()
-hrData = hourObjs()
-#wait2Market()
+stocks = StockObjs()[5]
+stocks.plot(stocks.minData,stocks.ticker) #plots should probably be on a separate thread
+wait2Market()
 # t1 = threading.Thread(target=newSocket)
 # t1.start()
-# time.sleep(1)
+# time.sleep(5)
 # print('passed thread')
 # ws = getSocket()
 # for stock in minData[0:2]:

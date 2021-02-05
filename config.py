@@ -1,12 +1,14 @@
+from pandas._libs.tslibs import Timestamp
+from alpaca import getCalendar
 import pandas as pd
+import matplotlib.pyplot as plot
 import requests, time
 from datetime import datetime
 from lxml import html
 from alpaca import api
 from tqdm import tqdm 
 
-minStocks = []
-hourStocks = []
+Stocks = []
 
 # Foundation Functions
 def wait(*duration):
@@ -15,15 +17,12 @@ def wait(*duration):
         print(f'Waiting for {duration}')
         time.sleep(duration)
         return
-    # otherwise wait until 9am on a weekday
     now = datetime.now()
-    current_time = now.strftime("%H:%M:%S")
-    today = datetime.today().weekday()
-    if today >= 4:
-        hours = ((6-today)*24) + (24-int(current_time[0:2])) + 9
-    else:
-        hours = (23-int(current_time[0:2])) + 9
-    seconds = hours*3600 + (90-int(current_time[3:5]))*60
+    timestamp1 = int(round(time.time()))
+    r = getCalendar(f'{now.year}-{now.month}-{now.day}',f'{now.year}-{now.month+1}-01')
+    date = datetime.strftime(r[1].date,'%Y-%m-%d')
+    dt = datetime(int(date[0:4]),int(date[5:7]),int(date[8:10]),9,30)
+    seconds = int(round(dt.timestamp())) - timestamp1
     print(f'Going to sleep for {seconds} seconds')
     time.sleep(seconds)
 
@@ -102,31 +101,27 @@ def pullSymbols():
             end = 22
         for i in range(2,end):
             try:
-                prices = tree.xpath(base_xpath.format(i,9,'span/'))[0]
-            except:
                 try:
+                    prices = tree.xpath(base_xpath.format(i,9,'span/'))[0]
+                except:
                     prices = tree.xpath(base_xpath.format(i,9,''))[0]
-                except:
-                    # If I can't find the price then skip the stock
-                    prices = 100000.0
-            try:
-                change = tree.xpath(base_xpath.format(i,10,'span/'))[0]
-            except:
                 try:
-                    change = tree.xpath(base_xpath.format(i,10,''))[0]
+                    change = tree.xpath(base_xpath.format(i,10,'span/'))[0]
                 except:
-                    change = '0.0%'
-            symbol = tree.xpath(base_xpath.format(i,2,''))[0]
-            volume = tree.xpath(base_xpath.format(i,11,''))[0]
-            if ',' in volume:
-                volume = float(volume.replace(',',''))
-            atr = tree.xpath(base_xpath.format(i,5,''))[0]
-            #print(symbol,prices,atr,change,volume)
-            row = [symbol,float(prices),round(float(atr)/float(prices),2),float(change[0:-1]),float(volume)]
-            # only add data if it's affordable
-            if float(prices) < max_price:
-                allSymbols.append(row)
-    df = pd.DataFrame(allSymbols,columns=['Symbol','Price','ATR','% Change','Volume'])
+                    change = tree.xpath(base_xpath.format(i,10,''))[0]
+                symbol = tree.xpath(base_xpath.format(i,2,''))[0]
+                volume = tree.xpath(base_xpath.format(i,11,''))[0]
+                if ',' in volume:
+                    volume = float(volume.replace(',',''))
+                volatile = tree.xpath(base_xpath.format(i,6,''))[0][0:-1]
+                #print(symbol,prices,atr,change,volume)
+                row = [symbol,float(prices),round(float(volatile),1),float(change[0:-1]),float(volume)]
+                # only add data if it's affordable
+                if float(prices) < max_price:
+                    allSymbols.append(row)
+            except:
+                pass
+    df = pd.DataFrame(allSymbols,columns=['Symbol','Price','Volatility','% Change','Volume'])
     df.to_csv('allSymbols.csv',index=False)
     print('Successfully saved symbol list')
     print(f'Found {len(allSymbols)} symbols')
@@ -163,69 +158,56 @@ def sort_stocks():
     start = pd.Timestamp(year = now.year,month = now.month,day = now.day-1,hour = 9, tz = 'US/Eastern').isoformat()
     # checking every symbol
     df1 = pd.read_csv('allSymbols.csv')
-    df1.sort_values(by=['ATR','% Change'],inplace=True,ascending=False)
+    df1.sort_values(by=['Volatility','% Change'],inplace=True,ascending=False)
     # saving only the top max_length ammount
     print('Saving the watchlist')
     for n in df1.index[0:watchlist_max_length]:
-        min_data = api.get_barset(df1['Symbol'][n],'1Min',start=start).df
-        hour_data = api.get_barset(df1['Symbol'][n],'15Min',start=start).df
-        for i in range(len(hour_data.index)):
-            if i % 4 != 0:
-                hour_data.drop(index=[hour_data.index[i]])
+        symbol = df1['Symbol'][n]
+        min_data = api.get_barset(symbol,'1Min',start=start).df[symbol]
+        hour_data = api.get_barset(symbol,'15Min',start=start).df[symbol]
+        for i in range(round(len(hour_data.index)/4)-2):
+            hour_data.drop(hour_data.index[i+1:i+4],inplace=True)
         if len(min_data.index) > 30:
-            watchlist.append([df1['Symbol'][n],df1['Price'][n],df1['ATR'][n],df1['% Change'][n],df1['Volume'][n]])
-            stock = minuteData(df1['Symbol'][n],min_data)
-            minObjs(stock,'a')
-            stock = minuteData(df1['Symbol'][n],hour_data)
-            hourObjs(stock,'a')
+            watchlist.append([symbol,df1['Price'][n],df1['Volatility'][n],df1['% Change'][n],df1['Volume'][n]])
+            stock = Stock(symbol,min_data,hour_data)
+            StockObjs(stock,'a')
         else:
             watchlist_max_length += 1
     df2 = pd.DataFrame(watchlist,columns=df1.columns)
     df2.to_csv('watchlist.csv',index=False)
     print('Successfully created watchlist')
 
-def getHistoricalData(ticker,frequency,days):
-    data = api.get_barset(ticker,frequency,limit=days).df[f'{ticker}']
-    try:
-        df = pd.DataFrame([[data['open'][0],data['high'][0],data['low'][0],data['close'][0],data['volume'][0]]],columns=['open','high','low','close','volume'])
-        for n in range(1,len(data.index)):
-            df = df.append(pd.Series([data['open'][n],data['high'][n],data['low'][n],data['close'][n],data['volume'][n]],index=df.columns),ignore_index=True)
-        #print(f'Successfully got data for {ticker}')
-        if len(data.index) < 10:
-            raise ZeroDivisionError
-        return df
-    except:
-        return (f'Couldn"t find data for {ticker}')
-
-class minuteData:
-    def __init__(self,ticker,df):
+class Stock:
+    def __init__(self,ticker,minuteData=None,hourData=None):
         self.ticker = ticker
-        self.df = df
-        self.timeframe = len(df.index)
+        data1 = []
+        for n in range(len(minuteData.index)):
+            data1.append([minuteData['close'][n]])
+        self.minData = pd.DataFrame(data1,columns=['price'])
+        self.minute_count = len(data1)
+        data2 = []
+        for n in range(len(hourData.index)):
+            data2.append([hourData['close'][n]])
+        self.hourData = pd.DataFrame(data2,columns=['price'])
+        self.hour_count = len(data2)
+    
+    def plot(self,df,title=''):
+        column = df.columns[0]
+        df.plot.line(y=column,title=title)
+        plot.show(block=True)
+    
+    def add_data(self,df,num):
+        self.df.append(pd.Series([num],index=self.df.index),ignore_index=True)
+        return True
 
-class hourData:
-    def __init__(self,ticker,df):
-        self.ticker = ticker
-        self.df = df
-        self.timeframe = len(df.index)
-
-def minObjs(obj=None,args=''):
-    global minStocks
+def StockObjs(obj=None,args=''):
+    global Stocks
     if not(args):
-        return minStocks
+        return Stocks
     else:
         if args == 'a':
-            minStocks.append(obj)
+            Stocks.append(obj)
         elif args == 'r':
-            minStocks.remove(obj)
+            Stocks.remove(obj)
 
-def hourObjs(obj=None,args=''):
-    global hourStocks
-    if not(args):
-        return hourStocks
-    else:
-        if args == 'a':
-            hourStocks.append(obj)
-        elif args == 'r':
-            hourStocks.remove(obj)
 # Trading Strategy Functions

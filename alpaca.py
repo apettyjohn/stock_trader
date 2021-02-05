@@ -126,7 +126,6 @@ def deleteWatchlist(id):
 # Calendar Functions
 def getCalendar(start_date='',end_date=''):
     if start_date and end_date:
-        print(start_date,end_date)
         # dates must be in "%Y-%m-%d" format
         r = api.get_calendar(start=start_date,end=end_date)
     else:
