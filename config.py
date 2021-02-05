@@ -1,13 +1,12 @@
-from alpaca_trade_api.entity import Watchlist
 import pandas as pd
 import requests, time
-from datetime import date, datetime
-from requests.auth import HTTPBasicAuth 
+from datetime import datetime
 from lxml import html
 from alpaca import api
 from tqdm import tqdm 
 
 minStocks = []
+hourStocks = []
 
 # Foundation Functions
 def wait(*duration):
@@ -84,38 +83,49 @@ def webScrap_list(type):
 def pullSymbols():
     print('Getting a list of symbols')
     allSymbols = []
-    max_price = 10.0
+    max_price = 15.0
     headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.104 Safari/537.36'}
     r = requests.get(f'https://finviz.com/screener.ashx?v=152&f=geo_usa,sh_opt_short,sh_price_u{int(max_price)}&r=0&c=0,1,5,6,49,50,51,52,65,66,67',headers=headers)
     tree = html.fromstring(r.content)
-    pages = int(tree.xpath('//*[@id="screener-content"]/table/tr[7]/td/a[12]/text()')[0])
+    pages = int(tree.xpath('//*[@id="screener-content"]/table/tr[7]/td/a/text()')[-1])
     # pull data from each page
     for n in tqdm (range(0,pages), desc="Loading..."):
         if n != 1:
             r = requests.get(f'https://finviz.com/screener.ashx?v=152&f=geo_usa,sh_opt_short,sh_price_u{int(max_price)}&r={n*20}&c=0,1,5,6,49,50,51,52,65,66,67',headers=headers)
             tree = html.fromstring(r.content)
-        symbols = tree.xpath('//*[@id="screener-content"]/table/tr[4]/td/table/tr/td[2]/a/text()')
-        prices = tree.xpath('//*[@id="screener-content"]/table/tr[4]/td/table/tr/td[9]/a/span/text()')
-        change = tree.xpath('//*[@id="screener-content"]/table/tr[4]/td/table/tr/td[10]/a/span/text()')
-        volume = tree.xpath('//*[@id="screener-content"]/table/tr[4]/td/table/tr/td[11]/a/text()')
-        atr = tree.xpath('///*[@id="screener-content"]/table/tr[4]/td/table/tr/td[5]/a/text()')
-        # fix volume data
-        for i in range(len(volume)):
-            if ',' in volume[i]:
-                volume[i] = float(volume[i].replace(',',''))
-        # fix % change data
-        for i in range(len(change)):
-            change[i] = float(change[i][0:-1])
-        # fix prices data
-        for i in range(len(prices)):
-            prices[i] = float(prices[i])
-        # fix atr data
-        for i in range(len(atr)):
-            atr[i] = float(atr[i])
-        # only add data if it's affordable
-        for i in range(len(prices)):
-            if prices[i] < max_price:
-                allSymbols.append([symbols[i],prices[i],atr[i],change[i],volume[i]])
+        base_xpath = '//*[@id="screener-content"]/table/tr[4]/td/table/tr[{}]/td[{}]/a/{}text()'
+        last_page = len(tree.xpath('//*[@id="screener-content"]/table/tr[4]/td/table/tr/td[2]/a/text()'))
+        # add the data row by row
+        if n == pages-1:
+            end = last_page
+        else:
+            end = 22
+        for i in range(2,end):
+            try:
+                prices = tree.xpath(base_xpath.format(i,9,'span/'))[0]
+            except:
+                try:
+                    prices = tree.xpath(base_xpath.format(i,9,''))[0]
+                except:
+                    # If I can't find the price then skip the stock
+                    prices = 100000.0
+            try:
+                change = tree.xpath(base_xpath.format(i,10,'span/'))[0]
+            except:
+                try:
+                    change = tree.xpath(base_xpath.format(i,10,''))[0]
+                except:
+                    change = '0.0%'
+            symbol = tree.xpath(base_xpath.format(i,2,''))[0]
+            volume = tree.xpath(base_xpath.format(i,11,''))[0]
+            if ',' in volume:
+                volume = float(volume.replace(',',''))
+            atr = tree.xpath(base_xpath.format(i,5,''))[0]
+            #print(symbol,prices,atr,change,volume)
+            row = [symbol,float(prices),round(float(atr)/float(prices),2),float(change[0:-1]),float(volume)]
+            # only add data if it's affordable
+            if float(prices) < max_price:
+                allSymbols.append(row)
     df = pd.DataFrame(allSymbols,columns=['Symbol','Price','ATR','% Change','Volume'])
     df.to_csv('allSymbols.csv',index=False)
     print('Successfully saved symbol list')
@@ -153,15 +163,21 @@ def sort_stocks():
     start = pd.Timestamp(year = now.year,month = now.month,day = now.day-1,hour = 9, tz = 'US/Eastern').isoformat()
     # checking every symbol
     df1 = pd.read_csv('allSymbols.csv')
-    df1.sort_values(by=['ATR'],inplace=True,ascending=False)
+    df1.sort_values(by=['ATR','% Change'],inplace=True,ascending=False)
     # saving only the top max_length ammount
     print('Saving the watchlist')
     for n in df1.index[0:watchlist_max_length]:
-        data = api.get_barset(df1['Symbol'][n],'1Min',start=start).df
-        if len(data.index) > 30:
+        min_data = api.get_barset(df1['Symbol'][n],'1Min',start=start).df
+        hour_data = api.get_barset(df1['Symbol'][n],'15Min',start=start).df
+        for i in range(len(hour_data.index)):
+            if i % 4 != 0:
+                hour_data.drop(index=[hour_data.index[i]])
+        if len(min_data.index) > 30:
             watchlist.append([df1['Symbol'][n],df1['Price'][n],df1['ATR'][n],df1['% Change'][n],df1['Volume'][n]])
-            stock = minuteData(df1['Symbol'][n],data)
+            stock = minuteData(df1['Symbol'][n],min_data)
             minObjs(stock,'a')
+            stock = minuteData(df1['Symbol'][n],hour_data)
+            hourObjs(stock,'a')
         else:
             watchlist_max_length += 1
     df2 = pd.DataFrame(watchlist,columns=df1.columns)
@@ -184,7 +200,13 @@ def getHistoricalData(ticker,frequency,days):
 class minuteData:
     def __init__(self,ticker,df):
         self.ticker = ticker
-        self.df = df[self.ticker]
+        self.df = df
+        self.timeframe = len(df.index)
+
+class hourData:
+    def __init__(self,ticker,df):
+        self.ticker = ticker
+        self.df = df
         self.timeframe = len(df.index)
 
 def minObjs(obj=None,args=''):
@@ -196,4 +218,14 @@ def minObjs(obj=None,args=''):
             minStocks.append(obj)
         elif args == 'r':
             minStocks.remove(obj)
+
+def hourObjs(obj=None,args=''):
+    global hourStocks
+    if not(args):
+        return hourStocks
+    else:
+        if args == 'a':
+            hourStocks.append(obj)
+        elif args == 'r':
+            hourStocks.remove(obj)
 # Trading Strategy Functions
