@@ -53,3 +53,7 @@ def removeStream(ws,channels):
     "data": {"streams": [streams]}
     }
     ws.send(json.dumps(listen_data))
+
+def closeSocket(ws):
+    ws.close()
+    print('Socket closed')

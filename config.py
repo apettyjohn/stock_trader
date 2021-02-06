@@ -1,8 +1,11 @@
+from api_keys import POLYGON_API_KEY, POLYGON_BASE_URL
 from pandas._libs.tslibs import Timestamp
 from alpaca import getCalendar
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plot
-import requests, time
+from mpl_finance import candlestick_ohlc
+import requests, time, json,pytz
 from datetime import datetime
 from lxml import html
 from alpaca import api
@@ -153,21 +156,45 @@ def sort_stocks():
     # Variables
     print('Sorting stocks')
     watchlist = []
-    watchlist_max_length = 30
+    polygon_min = {}
+    polygon_hour = {}
+    watchlist_max_length = 1
     now = datetime.now()
-    start = pd.Timestamp(year = now.year,month = now.month,day = now.day-1,hour = 9, tz = 'US/Eastern').isoformat()
-    # checking every symbol
+    day = str(now.day-1)
+    if int(day) < 10:
+        day = '0'+day
+    url = POLYGON_BASE_URL+"/v2/aggs/ticker/{}/range/{}/{}/{}/{}?apiKey={}"
     df1 = pd.read_csv('allSymbols.csv')
     df1.sort_values(by=['Volatility','% Change'],inplace=True,ascending=False)
     # saving only the top max_length ammount
-    print('Saving the watchlist')
-    for n in df1.index[0:watchlist_max_length]:
+    print('Getting Stock Data')
+    for i in tqdm(range(watchlist_max_length), desc="Loading..."):
+        n = df1.index[i]
         symbol = df1['Symbol'][n]
-        min_data = api.get_barset(symbol,'1Min',start=start).df[symbol]
-        hour_data = api.get_barset(symbol,'15Min',start=start).df[symbol]
-        for i in range(round(len(hour_data.index)/4)-2):
-            hour_data.drop(hour_data.index[i+1:i+4],inplace=True)
-        if len(min_data.index) > 30:
+        check = True
+        while check:
+            polygon_min = json.loads(requests.get(url.format(symbol,5,'minute',now.strftime('%Y-%m-%d')[0:-2]+day,now.strftime('%Y-%m-%d'),POLYGON_API_KEY)).content)
+            polygon_hour = json.loads(requests.get(url.format(symbol,1,'hour',now.strftime('%Y-%m-%d')[0:-2]+day,now.strftime('%Y-%m-%d'),POLYGON_API_KEY)).content)
+            status = polygon_hour['status']
+            #print(status)
+            if status == 'ERROR':
+                #print('exceeded rate limit,sleeping for 3 sec')
+                time.sleep(3)
+            else:
+                check = False
+        # convert json from response into a dataframe
+        data = []
+        for n in range(polygon_min['resultsCount']):
+            row = polygon_min['results'][n]
+            data.append([row['o'],row['h'],row['l'],row['c'],row['v'],row['t']/1000])
+        min_data = pd.DataFrame(data,columns=['open','high','low','close','volume','time'])
+        data = []
+        for n in range(polygon_hour['resultsCount']):
+            row = polygon_hour['results'][n]
+            data.append([row['o'],row['h'],row['l'],row['c'],row['v'],row['t']/1000])
+        hour_data = pd.DataFrame(data,columns=['open','high','low','close','volume','time'])
+        # if there's enough data add it to the list
+        if len(min_data.index) > 5 and len(hour_data.index) > 1:
             watchlist.append([symbol,df1['Price'][n],df1['Volatility'][n],df1['% Change'][n],df1['Volume'][n]])
             stock = Stock(symbol,min_data,hour_data)
             StockObjs(stock,'a')
@@ -178,23 +205,42 @@ def sort_stocks():
     print('Successfully created watchlist')
 
 class Stock:
-    def __init__(self,ticker,minuteData=None,hourData=None):
+    def __init__(self,ticker,minuteData,hourData):
         self.ticker = ticker
-        data1 = []
-        for n in range(len(minuteData.index)):
-            data1.append([minuteData['close'][n]])
-        self.minData = pd.DataFrame(data1,columns=['price'])
-        self.minute_count = len(data1)
-        data2 = []
-        for n in range(len(hourData.index)):
-            data2.append([hourData['close'][n]])
-        self.hourData = pd.DataFrame(data2,columns=['price'])
-        self.hour_count = len(data2)
+        self.min_data = minuteData
+        self.hour_data = hourData
+        # how much data is in each dataframe
+        self.minute_count = len(minuteData.index)
+        self.hour_count = len(hourData.index)
     
-    def plot(self,df,title=''):
-        column = df.columns[0]
-        df.plot.line(y=column,title=title)
-        plot.show(block=True)
+    def plot(self):
+        df1 = self.min_data
+        df2 = self.hour_data
+        new_df1 = df1.loc[:,['time','open','high','low','close']]
+        new_df2 = df2.loc[:,['time','open','high','low','close']]
+        new_df1.reset_index(inplace=True,drop=True)
+        new_df2.reset_index(inplace=True,drop=True)
+        x = np.linspace(0,len(df2.index),len(df2.index))
+        plots = 3
+        fig = plot.figure()
+        fig.suptitle(self.ticker)
+        for i in range(plots):
+            if i == 0:
+                axs1 = fig.add_subplot(3,1,1)
+                candlestick_ohlc(axs1,new_df1.values, width=0.5, colorup='green', colordown='red', alpha=0.8)
+                axs1.grid(True) 
+                #axs1.title.set_text('Minute(s) increment')
+            elif i == 1:
+                axs2 = fig.add_subplot(3,1,2)
+                candlestick_ohlc(axs2,new_df2.values, width=1, colorup='green', colordown='red', alpha=0.8)
+                axs2.grid(True) 
+                #axs2.title.set_text('Hour(s) increment')
+            elif i == 2:
+                axs3 = fig.add_subplot(3,1,3)
+                axs3.grid(True) 
+                axs3.bar(x,df2['volume'],label='volume')
+                #axs3.title.set_text('Volume')
+        plot.show()
     
     def add_data(self,df,num):
         self.df.append(pd.Series([num],index=self.df.index),ignore_index=True)

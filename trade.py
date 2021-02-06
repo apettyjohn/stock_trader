@@ -25,16 +25,19 @@ elif float(account['portfolio_value']) <= 0:
     print('Account balance too low to trade')
     sys.exit()
 
-pullSymbols()
+#pullSymbols()
 sort_stocks()
-stocks = StockObjs()[5]
-stocks.plot(stocks.minData,stocks.ticker) #plots should probably be on a separate thread
-wait2Market()
+stock = StockObjs()[0]
+stock.plot()
+# t2 = threading.Thread(target=lambda: stocks.plot(stocks.minData,stocks.ticker)) 
+# t2.start()
+# wait2Market()
 # t1 = threading.Thread(target=newSocket)
 # t1.start()
-# time.sleep(5)
-# print('passed thread')
+# time.sleep(2)
 # ws = getSocket()
+# time.sleep(5)
+# closeSocket(ws)
 # for stock in minData[0:2]:
 #     print(stock.ticker)
 #     streams = newStream(ws,stock.ticker)
