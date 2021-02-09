@@ -1,17 +1,15 @@
 from api_keys import POLYGON_API_KEY, POLYGON_BASE_URL
-from pandas._libs.tslibs import Timestamp
 from alpaca import getCalendar
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plot
-from mpl_finance import candlestick_ohlc
-import requests, time, json,pytz
+import requests, time, json, os
 from datetime import datetime
 from lxml import html
 from alpaca import api
 from tqdm import tqdm 
+from stocks import *
 
 Stocks = []
+url = POLYGON_BASE_URL+"/v2/aggs/ticker/{}/range/{}/{}/{}/{}?apiKey={}"
 
 # Foundation Functions
 def wait(*duration):
@@ -152,33 +150,58 @@ def percentATR(df):
     atr = sum(difference)/timeframe
     return atr/float(df['close'][last_loc])
 
-def sort_stocks():
+def create_stock_objs():
     # Variables
-    print('Sorting stocks')
-    watchlist = []
+    print('creating stock objs')
+    stocks = os.listdir('stock_objs')
+    # creating stock objects
+    for i in tqdm(range(len(stocks)), desc="Loading..."):
+        minDf = pd.read_csv(f'stock_objs/{stocks[i]}/min_data.csv')
+        hourDf = pd.read_csv(f'stock_objs/{stocks[i]}/hour_data.csv')
+        stock = Stock(stocks[i],minDf,hourDf)
+        addStockObjs(stock,'a')
+    print('Successfully created watchlist')
+
+def save_stocks():
+    print('Saving stocks')
+    # clean stock directory
+    try:
+        stock_objs = os.listdir('stock_objs')
+        for folder in stock_objs:
+            files = os.listdir(f'stock_objs/{folder}')
+            for file in files:
+                os.remove(f'stock_objs/{folder}/{file}')
+            os.rmdir(f'stock_objs/{folder}')
+    except:
+        os.mkdir('stock_objs')
+    # get symbols
+    df1 = pd.read_csv('allSymbols.csv')
+    df1.sort_values(by=['Volatility','% Change'],inplace=True,ascending=False)
+    # variables
     polygon_min = {}
     polygon_hour = {}
-    watchlist_max_length = 1
+    watchlist_max_length = 20
     now = datetime.now()
     day = str(now.day-1)
     if int(day) < 10:
-        day = '0'+day
-    url = POLYGON_BASE_URL+"/v2/aggs/ticker/{}/range/{}/{}/{}/{}?apiKey={}"
-    df1 = pd.read_csv('allSymbols.csv')
-    df1.sort_values(by=['Volatility','% Change'],inplace=True,ascending=False)
-    # saving only the top max_length ammount
-    print('Getting Stock Data')
+        day = f'0{day}'
+    # loop through dataframe and save data
     for i in tqdm(range(watchlist_max_length), desc="Loading..."):
         n = df1.index[i]
         symbol = df1['Symbol'][n]
         check = True
+        try:
+            os.mkdir(f'stock_objs/{symbol}')
+        except:
+            # skip repeats
+            watchlist_max_length += 1
+            continue
+        # make api call to polygon.io
         while check:
             polygon_min = json.loads(requests.get(url.format(symbol,5,'minute',now.strftime('%Y-%m-%d')[0:-2]+day,now.strftime('%Y-%m-%d'),POLYGON_API_KEY)).content)
             polygon_hour = json.loads(requests.get(url.format(symbol,1,'hour',now.strftime('%Y-%m-%d')[0:-2]+day,now.strftime('%Y-%m-%d'),POLYGON_API_KEY)).content)
             status = polygon_hour['status']
-            #print(status)
             if status == 'ERROR':
-                #print('exceeded rate limit,sleeping for 3 sec')
                 time.sleep(3)
             else:
                 check = False
@@ -193,67 +216,21 @@ def sort_stocks():
             row = polygon_hour['results'][n]
             data.append([row['o'],row['h'],row['l'],row['c'],row['v'],row['t']/1000])
         hour_data = pd.DataFrame(data,columns=['open','high','low','close','volume','time'])
-        # if there's enough data add it to the list
-        if len(min_data.index) > 5 and len(hour_data.index) > 1:
-            watchlist.append([symbol,df1['Price'][n],df1['Volatility'][n],df1['% Change'][n],df1['Volume'][n]])
-            stock = Stock(symbol,min_data,hour_data)
-            StockObjs(stock,'a')
-        else:
-            watchlist_max_length += 1
-    df2 = pd.DataFrame(watchlist,columns=df1.columns)
-    df2.to_csv('watchlist.csv',index=False)
-    print('Successfully created watchlist')
-
-class Stock:
-    def __init__(self,ticker,minuteData,hourData):
-        self.ticker = ticker
-        self.min_data = minuteData
-        self.hour_data = hourData
-        # how much data is in each dataframe
-        self.minute_count = len(minuteData.index)
-        self.hour_count = len(hourData.index)
-    
-    def plot(self):
-        df1 = self.min_data
-        df2 = self.hour_data
-        new_df1 = df1.loc[:,['time','open','high','low','close']]
-        new_df2 = df2.loc[:,['time','open','high','low','close']]
-        new_df1.reset_index(inplace=True,drop=True)
-        new_df2.reset_index(inplace=True,drop=True)
-        x = np.linspace(0,len(df2.index),len(df2.index))
-        plots = 3
-        fig = plot.figure()
-        fig.suptitle(self.ticker)
-        for i in range(plots):
-            if i == 0:
-                axs1 = fig.add_subplot(3,1,1)
-                candlestick_ohlc(axs1,new_df1.values, width=0.5, colorup='green', colordown='red', alpha=0.8)
-                axs1.grid(True) 
-                #axs1.title.set_text('Minute(s) increment')
-            elif i == 1:
-                axs2 = fig.add_subplot(3,1,2)
-                candlestick_ohlc(axs2,new_df2.values, width=1, colorup='green', colordown='red', alpha=0.8)
-                axs2.grid(True) 
-                #axs2.title.set_text('Hour(s) increment')
-            elif i == 2:
-                axs3 = fig.add_subplot(3,1,3)
-                axs3.grid(True) 
-                axs3.bar(x,df2['volume'],label='volume')
-                #axs3.title.set_text('Volume')
-        plot.show()
-    
-    def add_data(self,df,num):
-        self.df.append(pd.Series([num],index=self.df.index),ignore_index=True)
-        return True
-
-def StockObjs(obj=None,args=''):
-    global Stocks
-    if not(args):
-        return Stocks
-    else:
-        if args == 'a':
-            Stocks.append(obj)
-        elif args == 'r':
-            Stocks.remove(obj)
+        # save dataframes into csv files
+        with open(f'stock_objs/{symbol}/min_data.csv','w') as f:
+            min_data.to_csv(f)
+        with open(f'stock_objs/{symbol}/hour_data.csv','w') as f:
+            hour_data.to_csv(f)
 
 # Trading Strategy Functions
+def updateHourData():
+    Stocks = getStockObjs()
+    for stock in Stocks:
+        symbol = stock.ticker
+        now = datetime.now()
+        day = str(now.day-1)
+        if int(day) < 10:
+            day = '0'+day
+        polygon_hour = json.loads(requests.get(url.format(symbol,1,'hour',now.strftime('%Y-%m-%d')[0:-2]+day,now.strftime('%Y-%m-%d'),POLYGON_API_KEY)).content)
+        last_row = polygon_hour['results'][len(polygon_hour['results'])-1]
+        stock.addData([last_row['o'],last_row['h'],last_row['l'],last_row['c'],last_row['v'],last_row['t']/1000])

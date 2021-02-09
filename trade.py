@@ -1,9 +1,13 @@
 import sys,threading
+from datetime import datetime
+from pynput import keyboard
 from config import *
 from alpaca import *
 from stream import *
+from stocks import *
 
-stremas = []
+streams = []
+done = False
 
 def wait2Market():
     while True:
@@ -15,6 +19,12 @@ def wait2Market():
             print('Market is closed')
             wait()
             return
+def on_release(key):
+    if key == keyboard.Key.esc:
+        print('Quitting keyboard listener')
+        global done
+        done = True
+        listener.stop()
 
 # Check account status and balance
 account = checkAccount()
@@ -25,20 +35,24 @@ elif float(account['portfolio_value']) <= 0:
     print('Account balance too low to trade')
     sys.exit()
 
-#pullSymbols()
-sort_stocks()
-stock = StockObjs()[0]
-stock.plot()
-# t2 = threading.Thread(target=lambda: stocks.plot(stocks.minData,stocks.ticker)) 
-# t2.start()
-# wait2Market()
-# t1 = threading.Thread(target=newSocket)
-# t1.start()
-# time.sleep(2)
-# ws = getSocket()
-# time.sleep(5)
-# closeSocket(ws)
-# for stock in minData[0:2]:
-#     print(stock.ticker)
-#     streams = newStream(ws,stock.ticker)
-# print(streams)
+while True:
+    #pullSymbols()
+    #save_stocks()
+    create_stock_objs()
+    wait2Market()
+    # starting websocket thread
+    t1 = threading.Thread(target=newSocket)
+    t1.start()
+    # starting keyboard listener thread
+    listener = keyboard.Listener(on_release=on_release)
+    listener.start()
+    
+    # do this code until user quits or day is over
+    tic = datetime.now()
+    while not(done) and getClock()['is_open']:
+        time.sleep(0.5)
+        
+    if done:
+        ws = getSocket()
+        closeSocket(ws)
+        break

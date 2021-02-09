@@ -1,7 +1,6 @@
 *.csv
 *.txt
-stock_profiles/
-symbol_lists/
+stock_objs/
 __pycache__/
 .vscode/
 api_keys.py
