@@ -1,15 +1,15 @@
-from api_keys import POLYGON_API_KEY, POLYGON_BASE_URL
 from alpaca import getCalendar
 import pandas as pd
 import requests, time, json, os
+import datetime as dt
 from datetime import datetime
 from lxml import html
 from alpaca import api
 from tqdm import tqdm 
 from stocks import *
+from tdAmeritrade import *
 
 Stocks = []
-url = POLYGON_BASE_URL+"/v2/aggs/ticker/{}/range/{}/{}/{}/{}?apiKey={}"
 
 # Foundation Functions
 def wait(*duration):
@@ -83,7 +83,7 @@ def webScrap_list(type):
 def pullSymbols():
     print('Getting a list of symbols')
     allSymbols = []
-    max_price = 15.0
+    max_price = 5.0
     headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.104 Safari/537.36'}
     r = requests.get(f'https://finviz.com/screener.ashx?v=152&f=geo_usa,sh_opt_short,sh_price_u{int(max_price)}&r=0&c=0,1,5,6,49,50,51,52,65,66,67',headers=headers)
     tree = html.fromstring(r.content)
@@ -178,59 +178,49 @@ def save_stocks():
     df1 = pd.read_csv('allSymbols.csv')
     df1.sort_values(by=['Volatility','% Change'],inplace=True,ascending=False)
     # variables
-    polygon_min = {}
-    polygon_hour = {}
+    min = {}
+    hour = {}
     watchlist_max_length = 20
-    now = datetime.now()
-    day = str(now.day-1)
-    if int(day) < 10:
-        day = f'0{day}'
     # loop through dataframe and save data
     for i in tqdm(range(watchlist_max_length), desc="Loading..."):
         n = df1.index[i]
         symbol = df1['Symbol'][n]
-        check = True
         try:
             os.mkdir(f'stock_objs/{symbol}')
         except:
             # skip repeats
             watchlist_max_length += 1
             continue
-        # make api call to polygon.io
+        check = True
         while check:
-            polygon_min = json.loads(requests.get(url.format(symbol,5,'minute',now.strftime('%Y-%m-%d')[0:-2]+day,now.strftime('%Y-%m-%d'),POLYGON_API_KEY)).content)
-            polygon_hour = json.loads(requests.get(url.format(symbol,1,'hour',now.strftime('%Y-%m-%d')[0:-2]+day,now.strftime('%Y-%m-%d'),POLYGON_API_KEY)).content)
-            status = polygon_hour['status']
-            if status == 'ERROR':
-                time.sleep(3)
-            else:
+            try:
+                min = td_priceHistory(symbol,'day',2,'minute',1)['candles']
+                hour = td_priceHistory(symbol,'day',2,'minute',30)['candles']
                 check = False
+            except:
+                time.sleep(3)
         # convert json from response into a dataframe
         data = []
-        for n in range(polygon_min['resultsCount']):
-            row = polygon_min['results'][n]
-            data.append([row['o'],row['h'],row['l'],row['c'],row['v'],row['t']/1000])
+        for n in range(len(min)):
+            row = min[n]
+            data.append([row['open'],row['high'],row['low'],row['close'],row['volume'],row['datetime']])
         min_data = pd.DataFrame(data,columns=['open','high','low','close','volume','time'])
         data = []
-        for n in range(polygon_hour['resultsCount']):
-            row = polygon_hour['results'][n]
-            data.append([row['o'],row['h'],row['l'],row['c'],row['v'],row['t']/1000])
+        for n in range(len(hour)):
+            row = hour[n]
+            data.append([row['open'],row['high'],row['low'],row['close'],row['volume'],row['datetime']])
         hour_data = pd.DataFrame(data,columns=['open','high','low','close','volume','time'])
         # save dataframes into csv files
         with open(f'stock_objs/{symbol}/min_data.csv','w') as f:
-            min_data.to_csv(f)
+            min_data.to_csv(f,index=False)
         with open(f'stock_objs/{symbol}/hour_data.csv','w') as f:
-            hour_data.to_csv(f)
+            hour_data.to_csv(f,index=False)
 
 # Trading Strategy Functions
 def updateHourData():
     Stocks = getStockObjs()
     for stock in Stocks:
         symbol = stock.ticker
-        now = datetime.now()
-        day = str(now.day-1)
-        if int(day) < 10:
-            day = '0'+day
-        polygon_hour = json.loads(requests.get(url.format(symbol,1,'hour',now.strftime('%Y-%m-%d')[0:-2]+day,now.strftime('%Y-%m-%d'),POLYGON_API_KEY)).content)
-        last_row = polygon_hour['results'][len(polygon_hour['results'])-1]
-        stock.addData([last_row['o'],last_row['h'],last_row['l'],last_row['c'],last_row['v'],last_row['t']/1000])
+        hour = td_priceHistory(symbol,'day',1,'hour',1)['candles']
+        last_row = hour[len(hour)-1]
+        stock.addData([last_row['open'],last_row['high'],last_row['low'],last_row['close'],last_row['volume'],last_row['datetime']])

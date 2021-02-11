@@ -4,3 +4,6 @@ stock_objs/
 __pycache__/
 .vscode/
 api_keys.py
+node_modules/
+package-lock.json
+package.json
