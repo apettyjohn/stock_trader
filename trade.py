@@ -1,63 +1,48 @@
-import sys,threading,os,subprocess
-from datetime import datetime
+import sys,threading
 from pynput import keyboard
 from config import *
-from alpaca import *
 from stream import *
-from stocks import *
-from tdAmeritrade import *
 
-streams = []
-done = False
-
-def wait2Market():
-    while True:
-        open = getClock()['is_open']
-        if open:
-            print('Market is open')
-            return
-        else:
-            print('Market is closed')
-            wait()
-            return
 def on_release(key):
     if key == keyboard.Key.esc:
-        print('Quitting keyboard listener')
         global done
         done = True
+        print('Quitting keyboard listener')
         listener.stop()
+        #closeSocket()
+def accountCheck():
+    # Check account status and balance
+    account = checkAccount()
+    if account['status'] != 'ACTIVE':
+        print(f'Check account status: {account["status"]}')
+        sys.exit()
+    elif float(account['portfolio_value']) <= 0:
+        print('Account balance too low to trade')
+        sys.exit()
+def startStream():
+    # starting websocket and keyboard listener thread
+    t1 = threading.Thread(target=newSocket)
+    t1.start()
+    # wait until websocket connects
+    while not(checkIfAuthorized()):
+        time.sleep(1)
+    print('Passed Authorization waiting period')
+    # start listening to stock quotes
+    tickers = os.listdir('stock_objs')
+    for ticker in tickers:
+        newStream(ticker,'Q.')
 
-# Check account status and balance
-account = checkAccount()
-if account['status'] != 'ACTIVE':
-    print(f'Check account status: {account["status"]}')
-    sys.exit()
-elif float(account['portfolio_value']) < 0:
-    print('Account balance too low to trade')
-    sys.exit()
-
-# completed = subprocess.Popen('node server.js')
-# time.sleep(2)
+done = False
+accountCheck()
 
 while True:
-    #pullSymbols()
-    save_stocks()
+    #pullSymbols(max_price=5)
+    save_stocks(stocks_2_trade)
     create_stock_objs()
-    #wait2Market()
-    # starting websocket thread
-    # t1 = threading.Thread(target=newSocket)
-    # t1.start()
-    # starting keyboard listener thread
+    #startStream()
     listener = keyboard.Listener(on_release=on_release)
     listener.start()
-#     # do this code until user quits or day is over
-#     tic = datetime.now()
+    # do this code until user quits or day is over
     while not(done):
-        time.sleep(0.5)
-        
-    if done:
-        # ws = getSocket()
-        # closeSocket(ws)
-        # completed = subprocess.Popen('taskkill /f /im node.exe')
-        # time.sleep(.25)
-        break
+        time.sleep(0.25)
+    break

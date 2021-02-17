@@ -1,9 +1,8 @@
-import requests,json
+import requests,json,time,api_keys
 import alpaca_trade_api as tradeapi
 from api_keys import *
 
-# Environment variables
-rate_limit = 200
+### Alpaca
 
 #BASE_URL = "https://api.alpaca.markets" #--live account url
 BASE_URL = "https://paper-api.alpaca.markets" # --paper account url
@@ -28,14 +27,6 @@ def getAccountConfigs():
     return json.loads(r.content)
 def updateAccountConfigs(data):
     r = requests.patch(ACCOUNT_URL + '/configurations',json=data,headers=HEADERS)
-    return json.loads(r.content)
-def portfolioHistory(parameters):
-    # Parameters include:
-    # period - The duration of the data in <number>+<unit>, D for day, W for week, M for month and A for year
-    # timeframe - The resolution of time window. 1Min, 5Min, 15Min, 1H, or 1D
-    # date_end - in “YYYY-MM-DD” format. Default is current day
-    # extended_hours - bool, timeframe must be < 1D
-    r = requests.get(ACCOUNT_URL + '/portfolio/history',json=parameters,headers=HEADERS)
     return json.loads(r.content)
 
 # Order Functions
@@ -70,7 +61,7 @@ def deleteOrder(id):
         r = requests.delete(ORDERS_URL + f'/{id}',headers=HEADERS)
     return (r.content)
 
-# Position Functions
+# Other Functions
 def getPosition(*id):
     if type(id) == None:
         r = requests.get(POSITIONS_URL,headers=HEADERS)
@@ -83,44 +74,6 @@ def deletePosition(id):
     else:
         r = requests.delete(POSITIONS_URL + f'/{id}',headers=HEADERS)
     return json.loads(r.content)
-
-# Asset Functions
-def getAsset(id):
-    if type(id) == str:
-        r = requests.get(ASSETS_URL + '/{}'.format(id),headers=HEADERS)
-    elif type(id) == int:
-        r = requests.get(ASSETS_URL + '/:{}'.format(id),headers=HEADERS)
-    else:
-        r = "Invalid input for getAsset()"
-    return json.loads(r.content)
-
-# Watchlist Functions
-def getWatchlist(*id):
-    if type(id) == None:
-        r = requests.get(WATCHLIST_URL,headers=HEADERS)
-    else:
-        r = requests.get(WATCHLIST_URL + '/{}'.format(id),headers=HEADERS)
-    return json.loads(r.content)
-def newWatchlist(name,symbols=[]):
-    r = requests.post(WATCHLIST_URL,json={'name':name,'symbols':symbols},headers=HEADERS)
-    return json.loads(r.content)
-def updateWatchlist(id,*name,symbols=[]):
-    r = requests.get(WATCHLIST_URL + '/{}'.format(id),headers=HEADERS)
-    if type(name) == None:
-        name = r['name']
-    r = requests.put(WATCHLIST_URL + '/{}'.format(id),json={'name':name,'symbols':symbols},headers=HEADERS)
-    return json.loads(r.content)
-def addWatchlistSymbol(id,symbol):
-    r = requests.post(WATCHLIST_URL + '/{}'.format(id),json={'symbol':symbol},headers=HEADERS)
-    return json.loads(r.content)
-def removeWatchlistSymbol(id,symbol):
-    r = requests.delete(WATCHLIST_URL + f'/{id}/{symbol}',headers=HEADERS)
-    return json.loads(r.content)
-def deleteWatchlist(id):
-    r = requests.delete(WATCHLIST_URL + f'/{id}',headers=HEADERS)
-    return (r.content)
-
-# Calendar Functions
 def getCalendar(start_date='',end_date=''):
     if start_date and end_date:
         # dates must be in "%Y-%m-%d" format
@@ -128,8 +81,60 @@ def getCalendar(start_date='',end_date=''):
     else:
         r = api.get_calendar()
     return r
-
-# Clock Functions
 def getClock():
     r = requests.get(CLOCK_URL,headers=HEADERS)
     return json.loads(r.content)
+
+
+### TD Ameritrade
+
+base_url = 'https://api.tdameritrade.com/v1/marketdata/'
+
+def td_priceHistory(symbol,mainInterval,num1,subInterval,num2):
+    url = base_url+'{stock_ticker}/pricehistory?periodType={periodType}&period={period}&frequencyType={frequencyType}&frequency={frequency}'
+    full_url = url.format(stock_ticker=symbol,periodType=mainInterval,period=num1,frequencyType=subInterval,frequency=num2)
+    # Get request
+    code = 0
+    while code != 200:
+        r = requests.get(url=full_url,params={'apikey':TD_API_KEY},headers={'Authorization':'Bearer '+get_TD_token()})
+        code = r.status_code
+        dict = json.loads(r.content)
+        if code == 401:
+            td_newToken()
+            time.sleep(1)
+        elif code == 403:
+            time.sleep(2)
+        elif code == 400:
+            print('Bad request')
+            break
+    return dict
+
+def td_getQuote(symbol):
+    url = base_url+'quotes'
+    payload = {
+        'apikey':TD_API_KEY
+    }
+    if type(symbol) != str:
+        symbols = ','.join(symbol)
+        payload['symbol'] = symbols
+    else:
+        payload['symbol'] = symbol
+    r = requests.get(url=url,params=payload,headers={'Authorization':'Bearer ' + ACCESS_TOKEN})
+    return r
+
+def td_newToken():
+    url = 'https://api.tdameritrade.com/v1/oauth2/token'
+    payload = {
+        'grant_type': 'refresh_token',
+        'refresh_token':REFRESH_TOKEN,
+        'client_id':TD_API_KEY,
+        'code':'',
+        'access_type':'',
+        'redirect_uri':''
+    }
+    r = requests.post(url=url,data=payload)
+    content = r.json()
+    api_keys.change_TD_token(content['access_token'])
+    print('New TD access token')
+    return content
+

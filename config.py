@@ -1,89 +1,17 @@
-from alpaca import getCalendar
-import pandas as pd
-import requests, time, json, os
-import datetime as dt
+from api import *
+from stocks import *
 from datetime import datetime
 from lxml import html
-from alpaca import api
 from tqdm import tqdm 
-from stocks import *
-from tdAmeritrade import *
+import pandas as pd
+import requests, time, os
 
 Stocks = []
 
 # Foundation Functions
-def wait(*duration):
-    # if a number is entered then wait that long and quit
-    if type(duration) == int:
-        print(f'Waiting for {duration}')
-        time.sleep(duration)
-        return
-    now = datetime.now()
-    timestamp1 = int(round(time.time()))
-    r = getCalendar(f'{now.year}-{now.month}-{now.day}',f'{now.year}-{now.month+1}-01')
-    date = datetime.strftime(r[1].date,'%Y-%m-%d')
-    dt = datetime(int(date[0:4]),int(date[5:7]),int(date[8:10]),9,30)
-    seconds = int(round(dt.timestamp())) - timestamp1
-    print(f'Going to sleep for {seconds} seconds')
-    time.sleep(seconds)
-
-def pullIPOs():
-    # pull the number and list of IPOs from yahoo finance
-    print('Finding number of IPOs today')
-    try:
-        response = requests.get('https://finance.yahoo.com/calendar/ipo')
-        if response.status_code == 200:
-            print('Successfully pulled list')
-        else:
-            print(f'No response returned, status code: {response.status_code}')
-    except:
-        print(f'Http request failed. Check your connection')
-        return
-    tree = html.fromstring(response.content)
-    num = tree.xpath('//*[@id="fin-cal-events"]/div[2]/ul/li[4]/a/text()')
-    ipos = tree.xpath('//*[@id="cal-res-table"]/div[1]/table/tbody/tr/td[1]/a/text()')
-    # returns number and full list of IPOs
-    return [num[0],ipos]
-
-def webScrap_list(type):
-    # pulls lists of stocks from yahoo 
-    print(f'Making a request for list of {type}')
-    try:
-        response = requests.get(f'https://finance.yahoo.com/{type}')
-        if response.status_code == 200:
-            print('Successfully pulled list')
-        else:
-            print(f'No response returned, status code: {response.status_code}')
-    except:
-        print(f'Http request failed. Check your connection')
-        return
-    
-    # save data into lists
-    tree = html.fromstring(response.content)
-    symbols = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[1]/a/text()')
-    full_name = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[2]/text()')
-    price = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[3]/span/text()')
-    change = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[4]/span/text()')
-    percent_change = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[5]/span/text()')
-    volume = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[6]/span/text()')
-    mkt_cap = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[8]/span/text()')
-
-    fields = [symbols,full_name,price,change,percent_change,volume,mkt_cap]
-    data = list(range(len(fields)))
-    array = [type]
-    # group data into rows for each stock respecively
-    for n in list(range(len(symbols))):
-        for i in list(range(len(fields))):
-            field = fields[i]
-            data[i] = field[n]
-            if i == len(fields)-1:
-                array.append(data)
-    return array
-
-def pullSymbols():
+def pullSymbols(max_price):
     print('Getting a list of symbols')
     allSymbols = []
-    max_price = 5.0
     headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.104 Safari/537.36'}
     r = requests.get(f'https://finviz.com/screener.ashx?v=152&f=geo_usa,sh_opt_short,sh_price_u{int(max_price)}&r=0&c=0,1,5,6,49,50,51,52,65,66,67',headers=headers)
     tree = html.fromstring(r.content)
@@ -112,43 +40,21 @@ def pullSymbols():
                     change = tree.xpath(base_xpath.format(i,10,''))[0]
                 symbol = tree.xpath(base_xpath.format(i,2,''))[0]
                 volume = tree.xpath(base_xpath.format(i,11,''))[0]
+                atr = tree.xpath(base_xpath.format(i,5,''))[0]
                 if ',' in volume:
                     volume = float(volume.replace(',',''))
                 volatile = tree.xpath(base_xpath.format(i,6,''))[0][0:-1]
                 #print(symbol,prices,atr,change,volume)
-                row = [symbol,float(prices),round(float(volatile),1),float(change[0:-1]),float(volume)]
+                row = [symbol,float(prices),float(atr),round(float(volatile),1),float(change[0:-1]),float(volume)]
                 # only add data if it's affordable
                 if float(prices) < max_price:
                     allSymbols.append(row)
             except:
                 pass
-    df = pd.DataFrame(allSymbols,columns=['Symbol','Price','Volatility','% Change','Volume'])
+    df = pd.DataFrame(allSymbols,columns=['Symbol','Price','ATR','Volatility','% Change','Volume'])
     df.to_csv('allSymbols.csv',index=False)
     print('Successfully saved symbol list')
     print(f'Found {len(allSymbols)} symbols')
-
-def avg_volume(df):
-    timeframe = 14
-    last_loc = len(df.index)-1
-    volume = []
-    if timeframe > len(df.index):
-        timeframe = last_loc
-    for n in range(timeframe):
-        volume.append(float(df['volume'][df.index[last_loc-n]]))
-    return sum(volume)/float(timeframe)
-
-def percentATR(df):
-    timeframe = 14
-    last_loc = len(df.index)-1
-    difference = []
-    if timeframe > len(df.index):
-        timeframe = last_loc
-    for n in range(timeframe):
-        high = df['high'][df.index[last_loc-n]]
-        low = df['low'][df.index[last_loc-n]]
-        difference.append(float(high)-float(low))
-    atr = sum(difference)/timeframe
-    return atr/float(df['close'][last_loc])
 
 def create_stock_objs():
     # Variables
@@ -162,7 +68,7 @@ def create_stock_objs():
         addStockObjs(stock,'a')
     print('Successfully created watchlist')
 
-def save_stocks():
+def save_stocks(stocks_2_trade):
     print('Saving stocks')
     # clean stock directory
     try:
@@ -176,11 +82,11 @@ def save_stocks():
         os.mkdir('stock_objs')
     # get symbols
     df1 = pd.read_csv('allSymbols.csv')
-    df1.sort_values(by=['Volatility','% Change'],inplace=True,ascending=False)
+    df1.sort_values(by=['ATR','% Change'],inplace=True,ascending=False)
     # variables
     min = {}
     hour = {}
-    watchlist_max_length = 20
+    watchlist_max_length = stocks_2_trade
     # loop through dataframe and save data
     for i in tqdm(range(watchlist_max_length), desc="Loading..."):
         n = df1.index[i]
@@ -217,10 +123,53 @@ def save_stocks():
             hour_data.to_csv(f,index=False)
 
 # Trading Strategy Functions
-def updateHourData():
-    Stocks = getStockObjs()
-    for stock in Stocks:
-        symbol = stock.ticker
-        hour = td_priceHistory(symbol,'day',1,'hour',1)['candles']
-        last_row = hour[len(hour)-1]
-        stock.addData([last_row['open'],last_row['high'],last_row['low'],last_row['close'],last_row['volume'],last_row['datetime']])
+def webScrap_list(type):
+    # pulls lists of stocks from yahoo 
+    print(f'Making a request for list of {type}')
+    try:
+        response = requests.get(f'https://finance.yahoo.com/{type}')
+        if response.status_code == 200:
+            print('Successfully pulled list')
+        else:
+            print(f'No response returned, status code: {response.status_code}')
+    except:
+        print(f'Http request failed. Check your connection')
+        return
+    
+    # save data into lists
+    tree = html.fromstring(response.content)
+    symbols = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[1]/a/text()')
+    full_name = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[2]/text()')
+    price = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[3]/span/text()')
+    change = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[4]/span/text()')
+    percent_change = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[5]/span/text()')
+    volume = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[6]/span/text()')
+    mkt_cap = tree.xpath('//*[@id="scr-res-table"]/div[1]/table/tbody/tr/td[8]/span/text()')
+
+    fields = [symbols,full_name,price,change,percent_change,volume,mkt_cap]
+    data = list(range(len(fields)))
+    array = [type]
+    # group data into rows for each stock respecively
+    for n in list(range(len(symbols))):
+        for i in list(range(len(fields))):
+            field = fields[i]
+            data[i] = field[n]
+            if i == len(fields)-1:
+                array.append(data)
+    return array
+
+def wait(*duration):
+    # if a number is entered then wait that long and quit
+    if type(duration) == int:
+        print(f'Waiting for {duration}')
+        time.sleep(duration)
+        return
+    now = datetime.now()
+    timestamp1 = int(round(time.time()))
+    r = getCalendar(f'{now.year}-{now.month}-{now.day}',f'{now.year}-{now.month+1}-01')
+    date = datetime.strftime(r[1].date,'%Y-%m-%d')
+    dt = datetime(int(date[0:4]),int(date[5:7]),int(date[8:10]),9,30)
+    seconds = int(round(dt.timestamp())) - timestamp1
+    print(f'Going to sleep for {seconds} seconds')
+    time.sleep(seconds)
+

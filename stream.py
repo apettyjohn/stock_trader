@@ -1,56 +1,93 @@
+from logging import error
 from stocks import *
 from api_keys import *
-import websocket,json
+from api import *
+import numpy as np
+import pandas as pd
+import websocket,json,math
 
 BASE_URL = 'wss://data.alpaca.markets/stream'
 streams = []
 ws = None
+authorized = False
+percentOfPeak = 0.02
+stocks_2_trade = 5
+trade_size = float(checkAccount()['portfolio_value'])/(stocks_2_trade * 2)
+balance = 100
+df = pd.DataFrame([['-','-','-',balance]],columns=['stock','buy','sell','balance'])
+df.to_csv('tradeLog.csv',index=False)
+
+
+def checkIfAuthorized():
+    global authorized
+    return authorized
 
 # Functions for making a socket
 def on_open(ws):
-    print('Opened websocket')
     auth_data = {
         'action':'authenticate',
         'data':{"key_id": API_KEY, "secret_key": API_SECRET_KEY}
     }
     ws.send(json.dumps(auth_data))
+    print('Opened websocket')
 
-def on_message(ws,message):
+def on_message(message):
     message = json.loads(message)
+    print(message)
     if message['stream'] == 'authorization' and message['data']['status'] == 'authorized':
-        Stocks = getStockObjs()
-        # start streaming minute bars
-        for Stock in Stocks:
-            if Stock in Stocks[0:5]:
-                newStream(ws,Stock,'Q')
-            newStream(ws,Stock,'AM')
+        global authorized
+        authorized = True
+        print('Authenticated')
+    message = message['data']
     stock = getStockObjs(message['T'])
-    df = stock.min_data
-    if message['ev'] == 'AM':
-        stock.addData('minBars',[message['op'],message['h'],message['l'],message['c'],message['v'],message['e']/1000])
-    if message['ev'] == 'T':
-        stock.addData('trades',[message['p'],message['s']])
     if message['ev'] == 'Q':
-        stock.addData('quotes',[message['p'],message['P']])
-    
-def on_error(ws,error):
-    print('Recieved an error: ',error)
-
-def on_close(ws):
-    print('Closing Socket')
+        stock.last = float(message['P'])
+        change = float(message['P']) - stock.last
+        if stock.direction == 0:
+            stock.direction = -1
+        # Buying in the trough and selling at the peak
+        if stock.direction > 0:
+            if np.sign(stock.direction) == np.sign(change):
+                if float(message['P']) > stock.peak:
+                    stock.peak = float(message['P'])
+                    print(f'New peak for {stock.ticker}')
+            else:
+                if abs(float(message['P']) - stock.peak) < percentOfPeak * stock.buyPrice:
+                    pass
+                else:
+                    stock.direction = -1
+                    print(f'Direction changed to -1 for {stock.ticker}')
+                    stock.trough = float(message['p'])
+                    global balance
+                    global df
+                    balance += message['P'] - stock.buyPrice
+                    df.append(pd.Series([stock.ticker,stock.buyPrice,message['P'],balance],index=df.columns),ignore_index=True)
+                    df.to_csv('tradeLog.csv')
+                    print(f'New sell order for {stock.ticker}')
+        elif stock.direction < 0:
+            if np.sign(stock.direction) == np.sign(change):
+                    if float(message['p']) < stock.trough:
+                        stock.trough = float(message['p'])
+                        print(f'New trough for {stock.ticker}')
+            else:
+                if abs(float(message['p']) - stock.trough) > percentOfPeak * stock.trough:
+                    stock.direction = 1
+                    print(f'Direction changed to 1 for {stock.ticker}')
+                    stock.peak = float(message['P'])
+                    stock.buyPrice = float(message['p'])
+                    print(f'New buy order for {stock.ticker}')
+                else:
+                    pass
 
 def newSocket():
     global ws
-    ws = websocket.WebSocketApp(BASE_URL,on_open=on_open,on_close=on_close,on_error=on_error,on_message=on_message)
+    ws = websocket.WebSocketApp(BASE_URL,on_open=on_open,on_message=on_message,on_close=lambda:print('Closing Socket'),on_error=lambda error:print('Recieved an error: ',error))
     ws.run_forever()
 
-def getSocket():
-    return ws
-
 # Functions for modifying the active socket
-def newStream(ws,channel,type):
+def newStream(channel,type=''):
     # types include trads(T) quotes(Q) or minute bars(AM)
-    streams.append(f'{type}.{channel}')
+    streams.append(f'{type}{channel}')
     listen_data = {
     "action": "listen",
     "data": {"streams": streams}
@@ -58,7 +95,7 @@ def newStream(ws,channel,type):
     ws.send(json.dumps(listen_data))
     return streams
 
-def removeStream(ws,channels):
+def removeStream(channels):
     for channel in channels:
         if channels in streams:
             streams.remove(channel)
@@ -70,5 +107,5 @@ def removeStream(ws,channels):
     }
     ws.send(json.dumps(listen_data))
 
-def closeSocket(ws):
+def closeSocket():
     ws.close()
