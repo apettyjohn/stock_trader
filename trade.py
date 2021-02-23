@@ -2,6 +2,7 @@ import sys,threading
 from pynput import keyboard
 from config import *
 from stream import *
+from stopwatch import Stopwatch
 
 def keyboardListener():
     def on_press(key):
@@ -32,16 +33,19 @@ def startStream():
         time.sleep(1)
     # start listening to stock quotes
     tickers = os.listdir('stock_objs')
-    for ticker in tickers:
-        newStream(ticker,'Q.')
+    newStream(stock,'Q.')
 
 done = False
-stocks_2_trade = 1
+stocks_2_trade = 10
+stock = 'AMC'
+stpwtch = Stopwatch()
+stpwtch.start()
 accountCheck()
 
 while True:
     #pullSymbols(max_price=5)
-    save_stocks(stocks_2_trade)
+    save_stock(stock)
+    #save_stocks(stocks_2_trade)
     create_stock_objs()
     keyboardListener()
     startStream()
@@ -50,7 +54,5 @@ while True:
         time.sleep(0.5)
     closeSocket()
     break
-
-stocks = getStockObjs()
-for stock in stocks:
-    stock.plot()
+print(f'Program ran for {stpwtch.duration} seconds')
+calcProfit(100,stock)

@@ -1,9 +1,12 @@
+import stopwatch
 from stocks import *
 from api_keys import *
 from api import *
 import numpy as np
 import pandas as pd
-import websocket,json,time
+import websocket,json
+from scipy.ndimage.filters import gaussian_filter1d
+from stopwatch import Stopwatch
 
 BASE_URL = 'wss://data.alpaca.markets/stream'
 streams = []
@@ -12,7 +15,10 @@ authorized = False
 percentOfPeak = 0.02
 stocks_2_trade = 1
 balance = 100
+state = 'sell'
 trade_size = balance/(stocks_2_trade * 2)
+stpwtch = Stopwatch()
+stpwtch.start()
 
 def checkIfAuthorized():
     return authorized
@@ -28,44 +34,52 @@ def on_open(ws):
     print('Opened websocket')
 
 def on_message(ws,message):
-    def trade(object):
-        global balance
-        global n
-        stock = getStockObjs(object['T'])
-        num = object['P']
-        if stock.last == 0:
-            stock.last = object['p']
-        change = num - stock.last
-        # Buying in the trough and selling at the peak
-        if stock.direction > 0:
-            if np.sign(stock.direction) == np.sign(change):
-                if num > stock.peak:
-                    stock.peak = num
-            else:
-                if num < stock.peak:
-                    stock.direction = -1
-                    stock.trough = num
-                    balance += num - stock.buyPrice
-                    try:
-                        df = pd.read_csv(f'stock_objs/{stock.ticker}/sellPrices.csv')
-                        df = df.append(pd.Series([stock.buyIndex,stock.quoteNum,stock.buyPrice,num,balance],index=df.columns),ignore_index=True)
-                    except:
-                        df = pd.DataFrame([[stock.buyIndex,stock.quoteNum,stock.buyPrice,num,balance]],columns=['index1','index2','buy','sell','balance'])
-                    df.to_csv(f'stock_objs/{stock.ticker}/sellPrices.csv',index=False)
-        elif stock.direction < 0:
-            if np.sign(stock.direction) == np.sign(change):
-                    if num < stock.trough:
-                        stock.trough = num
-            else:
-                if num > stock.trough:
-                    stock.direction = 1
-                    stock.peak = num
-                    stock.buyPrice = num
-                    stock.buyIndex = stock.quoteNum
-        stock.last = num
+    def paperTrade(num,stock):
+        def trade(num,n,trade):
+            global state
+            if trade == 'sell' or trade == 'buy':
+                try:
+                    df1 = pd.read_csv(f'stock_objs/{stock.ticker}/sellPrices.csv')
+                    df1 = df1.append(pd.Series([n,num,trade],index=df1.columns),ignore_index=True)
+                except:
+                    df1 = pd.DataFrame([[n,num,trade]],columns=['index','change','type'])
+                df1.to_csv(f'stock_objs/{stock.ticker}/sellPrices.csv',index=False)
+                state = trade
+        if stpwtch.duration > 0.2:
+            stpwtch.restart()
+            try:
+                last = stock.quotes['price'][stock.quotes.index[-1]]
+                if last != num:
+                    stock.addData(num)
+                    n = stock.n
+                    if len(stock.quotes.index) > 10:
+                        y_smooth1 = gaussian_filter1d(stock.quotes['price'][-9:], 2)
+                    else:
+                        y_smooth1 = gaussian_filter1d(stock.quotes['price'], 2)
+                    stock.y_smooth.append(y_smooth1[-1])
+                    stock.n += 1
+                    if n < 1:
+                        return
+                    elif n < 2:
+                        stock.y_deriv1.append(stock.y_smooth[-1]-stock.y_smooth[-2])
+                        return
+                    stock.y_deriv1.append(stock.y_smooth[-1]-stock.y_smooth[-2])
+                    stock.y_deriv2.append(stock.y_deriv1[-1]-stock.y_deriv1[-2])
+                    if state == 'sell':
+                        if np.sign(stock.y_deriv1[-1]) + np.sign(stock.y_deriv1[-2]) == 0:
+                            if np.sign(stock.y_deriv2[-1]) < 0:
+                                trade(num,n,'buy')
+                    else:
+                        if np.sign(stock.y_deriv1[-1])+np.sign(stock.y_deriv1[-2]) == 0:
+                            if np.sign(stock.y_deriv2[-1]) > 0:
+                                trade(num,n,'sell')
+            except:
+                stock.addData(num)
+                y_smooth1 = gaussian_filter1d(stock.quotes['price'], 2)
+                stock.y_smooth.append(y_smooth1[-1])
+                stock.n += 1
 
     message = json.loads(message)
-    print(message)
     if message['stream'] == 'authorization' and message['data']['status'] == 'authorized':
         global authorized
         authorized = True
@@ -73,8 +87,7 @@ def on_message(ws,message):
     message = message['data']
     if message['ev'] == 'Q':
         stock = getStockObjs(message['T'])
-        stock.addData(message['P'])
-        trade(message)
+        paperTrade(message['P'],stock)
 
 def newSocket():
     global ws

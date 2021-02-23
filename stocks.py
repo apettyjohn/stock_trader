@@ -1,57 +1,77 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+from scipy.ndimage.filters import gaussian_filter1d
 
 Stocks = []
 
 class Stock:
-    def __init__(self,ticker,minuteData,hourData):
+    def __init__(self,ticker):
         self.ticker = ticker
-        self.min_data = minuteData
-        self.hour_data = hourData
-        self.quotes = []
-        self.trades = []
-        self.minBars = []
-        self.direction = -1
-        self.peak = 0
-        self.trough = 0
-        self.last = 0
-        self.buyPrice = 0
-        self.buyIndex = 0
-        self.quoteNum = 0
+        self.quotes = None
+        self.n = 0
+        self.y_smooth = []
+        self.y_deriv1 = []
+        self.y_deriv2 = []
     
     def addData(self,price):
-        try:
-            df = pd.read_csv(f'stock_objs/{self.ticker}/quotes.csv')
-            df = df.append(pd.Series([self.quoteNum,price],index=df.columns),ignore_index=True)
-        except:
-            df = pd.DataFrame([[int(self.quoteNum),price]],columns=['index','price'])
-        df.to_csv(f'stock_objs/{self.ticker}/quotes.csv',index=False)
-        self.quoteNum += 1
+        if type(self.quotes).__name__ == 'NoneType':
+            self.quotes = pd.DataFrame([[int(self.n),price]],columns=['index','price'])
+        else:
+            self.quotes = self.quotes.append(pd.Series([int(self.n),price],index=self.quotes.columns),ignore_index=True)
+        self.quotes.to_csv(f'stock_objs/{self.ticker}/quotes.csv',index=False)
 
     def plot(self):
-        try:
-            df1 = pd.read_csv(f'stock_objs/{self.ticker}/quotes.csv')
-            df2 = pd.read_csv(f'stock_objs/{self.ticker}/sellPrices.csv')
-        except:
-            return False
-        x1 = []
-        y1 = []
-        for x in df1.index:
-            x1.append(df1['index'][x])
-            y1.append(df1['price'][x])
-        x2,y2,x3,y3 = []
-        for x in df2.index:
-            if type(x) != str:
-                x2.append(int(df2['index2'][x]))
-                y2.append(df2['sell'][x])
-                x3.append(int(df2['index1'][x]))
-                y3.append(df2['buy'][x])
+        def regressions(x1,y1):
+            y_smooth1 = gaussian_filter1d(y1, 3)
+            y_deriv1 = gaussian_filter1d(y_smooth1,2,order=1)
+            y_deriv2 = gaussian_filter1d(y_smooth1,2,order=2)
+            fig, ax = plt.subplots(3)
+            fig.suptitle(f'{self.ticker}')
+            ax[0].plot(x1,y1,c='black',linewidth=1.0)
+            ax[0].scatter(x1,y_smooth1,c='red',s=15)
+            ax[1].scatter(x1,y_deriv1,c='blue',s=15)
+            ax[2].scatter(x1,y_deriv2,c='blue',s=15)
+            ax[0].grid()
+            ax[1].grid()
+            ax[2].grid()
+            plt.show()
+        def buySell(x1,y1,x_b,y_b,x_s,y_s):
+            fig,ax = plt.subplots(3)
+            fig.suptitle(f'{self.ticker}')
+            ax[0].plot(y1,c='black',linewidth=1.0)
+            ax[0].plot(self.y_smooth,c='blue',linewidth=2.0)
+            ax[0].scatter(x_b,y_b,s=20,c='green') # buy
+            ax[0].scatter(x_s,y_s,s=20,c='red') # sell
+            ax[1].plot(self.y_deriv1)
+            ax[2].plot(self.y_deriv2)
+            ax[0].grid()
+            ax[1].grid()
+            ax[2].grid()
+            plt.show()
 
-        plt.scatter(x1,y1,s=10,c='blue')
-        plt.scatter(x2,y2,s=15,c='green')
-        plt.scatter(x3,y3,s=15,c='red')
-        plt.show()
+        try:
+            df1 = pd.read_csv(f'stock_objs/{self.ticker}/sellPrices.csv')
+        except:
+            return
+        df2 = self.quotes
+        x1 = np.array(range(len(df2.index)))
+        y1 = []
+        for x in df2['price']:
+            y1.append(x)
+        x2 = []
+        y2 = []
+        x3 = []
+        y3 = []
+        for x in range(len(df1.index)):
+            if df1['type'][x] == 'buy':
+                x2.append(df1['index'][x])
+                y2.append(df1['change'][x])
+            else:
+                x3.append(df1['index'][x])
+                y3.append(df1['change'][x])
+        buySell(x1,y1,x2,y2,x3,y3)
+        #regressions(x1,y1)
 
 def addStockObjs(obj=None,args=''):
     global Stocks

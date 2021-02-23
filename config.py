@@ -6,8 +6,6 @@ from tqdm import tqdm
 import pandas as pd
 import requests, time, os
 
-Stocks = []
-
 # Foundation Functions
 def pullSymbols(max_price):
     print('Getting a list of symbols')
@@ -58,15 +56,13 @@ def pullSymbols(max_price):
 
 def create_stock_objs():
     # Variables
-    print('creating stock objs')
+    print('Creating stock objs')
     stocks = os.listdir('stock_objs')
     # creating stock objects
     for i in tqdm(range(len(stocks)), desc="Loading..."):
-        minDf = pd.read_csv(f'stock_objs/{stocks[i]}/min_data.csv')
-        hourDf = pd.read_csv(f'stock_objs/{stocks[i]}/hour_data.csv')
-        stock = Stock(stocks[i],minDf,hourDf)
-        addStockObjs(stock,'a')
-    print('Successfully created watchlist')
+        addStockObjs(Stock(stocks[i]),'a')
+    print('Successfully created stock objects')
+    getStockObjs()
 
 def save_stocks(stocks_2_trade):
     print('Saving stocks')
@@ -82,10 +78,9 @@ def save_stocks(stocks_2_trade):
         os.mkdir('stock_objs')
     # get symbols
     df1 = pd.read_csv('allSymbols.csv')
-    df1.sort_values(by=['ATR','% Change'],inplace=True,ascending=False)
+    df1['% Change'] = [abs(elem) for elem in df1['% Change']]
+    df1.sort_values(by=['% Change'],inplace=True,ascending=False)
     # variables
-    min = {}
-    hour = {}
     watchlist_max_length = stocks_2_trade
     # loop through dataframe and save data
     for i in tqdm(range(watchlist_max_length), desc="Loading..."):
@@ -121,6 +116,42 @@ def save_stocks(stocks_2_trade):
             min_data.to_csv(f,index=False)
         with open(f'stock_objs/{symbol}/hour_data.csv','w') as f:
             hour_data.to_csv(f,index=False)
+
+def save_stock(name):
+    print(f'Saving stock {name}')
+    # clean stock directory
+    try:
+        stock_objs = os.listdir('stock_objs')
+        if name in stock_objs:
+            files = os.listdir(f'stock_objs/{name}')
+            for file in files:
+                os.remove(f'stock_objs/{name}/{file}')
+            os.rmdir(f'stock_objs/{name}')
+    except:
+        pass
+    os.mkdir(f'stock_objs/{name}')
+    check = True
+    while check:
+        try:
+            min = td_priceHistory(name,'day',2,'minute',1)['candles']
+            hour = td_priceHistory(name,'day',2,'minute',30)['candles']
+            check = False
+        except:
+            time.sleep(3)
+    # convert json from response into a dataframe
+    data = []
+    for n in range(len(min)):
+        row = min[n]
+        data.append([row['open'],row['high'],row['low'],row['close'],row['volume'],row['datetime']])
+    min_data = pd.DataFrame(data,columns=['open','high','low','close','volume','time'])
+    data = []
+    for n in range(len(hour)):
+        row = hour[n]
+        data.append([row['open'],row['high'],row['low'],row['close'],row['volume'],row['datetime']])
+    hour_data = pd.DataFrame(data,columns=['open','high','low','close','volume','time'])
+    # save dataframes into csv files
+    min_data.to_csv(f'stock_objs/{name}/min_data.csv',index=False)
+    hour_data.to_csv(f'stock_objs/{name}/hour_data.csv',index=False)
 
 # Trading Strategy Functions
 def webScrap_list(type):
@@ -173,3 +204,21 @@ def wait(*duration):
     print(f'Going to sleep for {seconds} seconds')
     time.sleep(seconds)
 
+def calcProfit(starting_balance,stock):
+    try:
+        df1 = pd.read_csv(f'stock_objs/{stock}/sellPrices.csv')
+    except:
+        return False
+    balance = starting_balance
+    for n in df1.index:
+        row = df1.loc[n]
+        trade_type = row['type']
+        price = row['change']
+        if n == df1.index[-1]:
+            if trade_type == 'buy':
+                break
+        if trade_type == 'buy':
+            balance -= price
+        else:
+            balance += price
+    print(f'Final balance: {balance}, Profit: {balance-starting_balance}')
