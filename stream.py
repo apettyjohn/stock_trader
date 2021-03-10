@@ -16,7 +16,7 @@ percentOfPeak = 0.02
 stocks_2_trade = 1
 balance = 100
 state = 'sell'
-trade_size = balance/(stocks_2_trade * 2)
+trade_size = 5
 stpwtch = Stopwatch()
 stpwtch.start()
 
@@ -79,6 +79,76 @@ def on_message(ws,message):
                 stock.y_smooth.append(y_smooth1[-1])
                 stock.n += 1
 
+    def liveTrade(num,stock):
+        def trade(trade):
+            global state
+            state = trade
+            if trade == 'buy':
+                td_newOrder(stock.ticker,trade_size,'buy')
+            elif trade == 'sell':
+                td_newOrder(stock.ticker,trade_size,'sell')
+    
+        if stpwtch.duration > 0.5:
+            try:
+                last = stock.quotes['price'][stock.quotes.index[-1]]
+                if last != num:
+                    stock.addData(num)
+                    n = stock.n
+                    if len(stock.quotes.index) > 10:
+                        y_smooth1 = gaussian_filter1d(stock.quotes['price'][-9:], 2)
+                    else:
+                        y_smooth1 = gaussian_filter1d(stock.quotes['price'], 2)
+                    stock.y_smooth.append(y_smooth1[-1])
+                    stock.n += 1
+                    if n < 1:
+                        return
+                    elif n < 2:
+                        stock.y_deriv1.append(stock.y_smooth[-1]-stock.y_smooth[-2])
+                        return
+                    stock.y_deriv1.append(stock.y_smooth[-1]-stock.y_smooth[-2])
+                    stock.y_deriv2.append(stock.y_deriv1[-1]-stock.y_deriv1[-2])
+                    global state
+                    if state == 'sell':
+                        if np.sign(stock.y_deriv1[-1]) + np.sign(stock.y_deriv1[-2]) == 0:
+                            if np.sign(stock.y_deriv2[-1]) < 0:
+                                trade('buy')
+                                stock.orderFilled = False
+                                orders = []
+                                stpwtch.restart()
+                                while not(stock.orderFilled):
+                                    filled_orders = td_getOrder(status='filled')
+                                    for order in filled_orders:
+                                        if order['orderLegCollection'][0]['instrument']['symbol'] == stock.ticker:
+                                            orders.append(order)
+                                    if orders[0]['orderLegCollection'][0]['instruction'] == 'BUY':
+                                        stock.orderFilled = True
+                                    if stpwtch.duration > 3:
+                                        state = 'sell'
+                                        break
+                    else:
+                        if np.sign(stock.y_deriv1[-1])+np.sign(stock.y_deriv1[-2]) == 0:
+                            if np.sign(stock.y_deriv2[-1]) > 0:
+                                trade('sell')
+                                stock.orderFilled = False
+                                orders = []
+                                stpwtch.restart()
+                                while not(stock.orderFilled):
+                                    filled_orders = td_getOrder(status='filled')
+                                    for order in filled_orders:
+                                        if order['orderLegCollection'][0]['instrument']['symbol'] == stock.ticker:
+                                            orders.append(order)
+                                    if orders[0]['orderLegCollection'][0]['instruction'] == 'SELL':
+                                        stock.orderFilled = True
+                                    if stpwtch.duration > 3:
+                                        state = 'buy'
+                                        break
+            except:
+                stock.addData(num)
+                y_smooth1 = gaussian_filter1d(stock.quotes['price'], 2)
+                stock.y_smooth.append(y_smooth1[-1])
+                stock.n += 1
+            stpwtch.restart()
+
     message = json.loads(message)
     if message['stream'] == 'authorization' and message['data']['status'] == 'authorized':
         global authorized
@@ -87,7 +157,8 @@ def on_message(ws,message):
     message = message['data']
     if message['ev'] == 'Q':
         stock = getStockObjs(message['T'])
-        paperTrade(message['P'],stock)
+        #paperTrade(message['P'],stock)
+        liveTrade(message['P'],stock)
 
 def newSocket():
     global ws
@@ -102,6 +173,7 @@ def newStream(channel,type=''):
     "action": "listen",
     "data": {"streams": streams}
     }
+    print(f'Now listening to {channel}')
     ws.send(json.dumps(listen_data))
     return streams
 

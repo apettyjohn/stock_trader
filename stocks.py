@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.ndimage.filters import gaussian_filter1d
+import os
 
 Stocks = []
 
@@ -10,6 +11,9 @@ class Stock:
         self.ticker = ticker
         self.quotes = None
         self.n = 0
+        self.positionQty = 0
+        self.positionPrice = 0
+        self.orderFilled = True
         self.y_smooth = []
         self.y_deriv1 = []
         self.y_deriv2 = []
@@ -19,6 +23,8 @@ class Stock:
             self.quotes = pd.DataFrame([[int(self.n),price]],columns=['index','price'])
         else:
             self.quotes = self.quotes.append(pd.Series([int(self.n),price],index=self.quotes.columns),ignore_index=True)
+        if self.ticker not in os.listdir('stock_objs'):
+            os.mkdir(f'stock_objs/{self.ticker}')
         self.quotes.to_csv(f'stock_objs/{self.ticker}/quotes.csv',index=False)
 
     def plot(self):

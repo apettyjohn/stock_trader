@@ -62,7 +62,6 @@ def create_stock_objs():
     for i in tqdm(range(len(stocks)), desc="Loading..."):
         addStockObjs(Stock(stocks[i]),'a')
     print('Successfully created stock objects')
-    getStockObjs()
 
 def save_stocks(stocks_2_trade):
     print('Saving stocks')
@@ -78,8 +77,8 @@ def save_stocks(stocks_2_trade):
         os.mkdir('stock_objs')
     # get symbols
     df1 = pd.read_csv('allSymbols.csv')
-    df1['% Change'] = [abs(elem) for elem in df1['% Change']]
-    df1.sort_values(by=['% Change'],inplace=True,ascending=False)
+    #df1['% Change'] = [abs(elem) for elem in df1['% Change']]
+    df1.sort_values(by=['Volume','% Change'],inplace=True,ascending=False)
     # variables
     watchlist_max_length = stocks_2_trade
     # loop through dataframe and save data
@@ -130,28 +129,6 @@ def save_stock(name):
     except:
         pass
     os.mkdir(f'stock_objs/{name}')
-    check = True
-    while check:
-        try:
-            min = td_priceHistory(name,'day',2,'minute',1)['candles']
-            hour = td_priceHistory(name,'day',2,'minute',30)['candles']
-            check = False
-        except:
-            time.sleep(3)
-    # convert json from response into a dataframe
-    data = []
-    for n in range(len(min)):
-        row = min[n]
-        data.append([row['open'],row['high'],row['low'],row['close'],row['volume'],row['datetime']])
-    min_data = pd.DataFrame(data,columns=['open','high','low','close','volume','time'])
-    data = []
-    for n in range(len(hour)):
-        row = hour[n]
-        data.append([row['open'],row['high'],row['low'],row['close'],row['volume'],row['datetime']])
-    hour_data = pd.DataFrame(data,columns=['open','high','low','close','volume','time'])
-    # save dataframes into csv files
-    min_data.to_csv(f'stock_objs/{name}/min_data.csv',index=False)
-    hour_data.to_csv(f'stock_objs/{name}/hour_data.csv',index=False)
 
 # Trading Strategy Functions
 def webScrap_list(type):
