@@ -42,11 +42,15 @@ def trade(trade):
             order = rh.orders.get_all_crypto_orders()[0]
             if order['state'] != 'confirmed' and order['state'] != 'unconfirmed':
                 break
-        buyPrice = float(order['rounded_executed_notional'])
+        buyPrice = num
         if not(suppressOutput):
             print(f'Bought {trade_size} shares of {crypto} @ {buyPrice}')
+            print(f'1stDerivative:{y_deriv1Ask},2ndDerivative:{y_deriv2Ask}')
     elif trade == 'sell':
         num = bid
+        if crypto != 'DOGE':
+            if roundTo > 2:
+                num = round(num,2)
         rh_marketOrder(crypto,positionQty,'sell')
         time.sleep(0.5)
         while True:
@@ -55,8 +59,7 @@ def trade(trade):
                 break
         if not(suppressOutput):
             print(f'Sold {positionQty} shares of {crypto} @ {num}')
-        if buyPrice == 0:
-            buyPrice = bid
+            print(f'1stDerivative:{y_deriv1Bid},2ndDerivative:{y_deriv2Bid}')
         balance += (num-buyPrice)*positionQty
         positionQty = 0
     try:
@@ -140,9 +143,18 @@ def rh_logout(signBackIn=False):
         rh_login()
 def rh_getPrice(crypto):
     try:
-        return rh.crypto.get_crypto_quote(crypto)
+        quote = rh.crypto.get_crypto_quote(crypto)
     except Exception as e:
         print("Error getting stock price:", e)
+        quote = None
+        count = 0
+        while type(quote) == None:
+            time.sleep(1)
+            quote = rh.crypto.get_crypto_quote(crypto)
+            count += 1
+            if count > 10:
+                raise TypeError
+    return quote
 def rh_marketOrder(symbol,shares,instruction):
     try:
         if instruction == 'buy':
@@ -190,6 +202,29 @@ def trend(crypto,fractionOfDay=1,interval='5minute',span='day'):
         prices.append((float(num['close_price'])+float(num['open_price']))/2)
     diffs = np.diff(prices)
     return round(sum(diffs),5)
+def lessThanLocalPeak(num):
+    data = rh_getHistoricalCryptoPrice(crypto,interval='5minute',span='day')
+    peak = 0
+    for number in data[-math.ceil(len(data)*0.5):]:
+        if float(number['close_price']) > peak:
+            peak = float(number['close_price'])
+    return peak-num >= peak*0.05
+def peaked(num):
+    data = rh_getHistoricalCryptoPrice(crypto,interval='15second',span='hour')
+    peak = 0
+    count = 0
+    for number in data:
+        if float(number['close_price']) > peak:
+            peak = float(number['close_price'])
+    for number in data.reverse():
+        count += 1
+        number = float(number['close_price'])
+        if number == peak:
+            break
+    total = count * 0.25
+    if (peak-num):
+        return True
+
 
 # Setup
 y_smoothBid = []
@@ -200,11 +235,11 @@ y_deriv2Bid = []
 y_deriv2Ask = []
 done = False
 suppressOutput = False
-dropQuotes = False
+dropQuotes = True
 trades = 0
 buyPrice = 0
 positionQty = 0
-roundTo = 3
+roundTo = 2
 crypto = 'ETC'
 state = 'sell'
 stpwtch = Stopwatch()
@@ -232,18 +267,19 @@ y_smoothBid.append(bid)
 while not(done):
     if time2Logout.duration > 86000:
         rh_logout(signBackIn=True)
-    try:
-        num = rh_getPrice(crypto)
-        ask = round(float(num['ask_price']),roundTo)
-        bid = round(float(num['bid_price']),roundTo)
-        if state == 'buy': # I'm really selling here
-            num = bid
-            column = 'bid'
-        elif state == 'sell': # This actually means buy
-            num = ask
-            column = 'ask'
-        last = df[column].iat[-1]
-        if last != num:
+    if stpwtch.duration > 100:
+        try:
+            num = rh_getPrice(crypto)
+            ask = round(float(num['ask_price']),roundTo)
+            bid = round(float(num['bid_price']),roundTo)
+            if state == 'buy': # I'm really selling here
+                num = bid
+                column = 'bid'
+            elif state == 'sell': # This actually means buy
+                num = ask
+                column = 'ask'
+            last = df[column].iat[-1]
+            #if last != num:
             df = df.append(pd.Series([ask,bid,(ask+bid)/2],index=df.columns),ignore_index=True)
             df.to_csv(f'stock_objs/{crypto}/quotes.csv',index=False)
             if len(df.index) > 20:
@@ -262,48 +298,40 @@ while not(done):
             else:
                 y_smoothAsk.append(gaussian_filter1d(df['ask'], 3)[-1])
                 y_smoothBid.append(gaussian_filter1d(df['bid'], 3)[-1])
-            if len(y_deriv1Ask) < 5:
-                y_deriv1Ask.append(y_smoothAsk[-1]-y_smoothAsk[-2])
-                y_deriv1Bid.append(y_smoothBid[-1]-y_smoothBid[-2])
-                continue
-            else:
-                y_deriv1Ask.append(gaussian_filter1d(np.diff(y_smoothAsk), 3)[-1])
-                y_deriv1Bid.append(gaussian_filter1d(np.diff(y_smoothBid), 3)[-1])
-            if len(y_deriv2Ask) < 5:
-                y_deriv2Ask.append(y_deriv1Ask[-1]-y_deriv1Ask[-2])
-                y_deriv2Bid.append(y_deriv1Bid[-1]-y_deriv1Bid[-2])
-                continue
-            else:
-                y_deriv2Ask.append(gaussian_filter1d(np.diff(y_deriv1Ask), 3)[-1])
-                y_deriv2Bid.append(gaussian_filter1d(np.diff(y_deriv1Bid), 3)[-1])
-            if stpwtch.duration > 0.1:
-                orderState = rh.orders.get_all_crypto_orders()[0]['state']
-                if orderState != 'confirmed' and orderState != 'unconfirmed':
-                    if state == 'sell':
-                        minTrend = trend(crypto,0.01)
-                        secTrend = trend(crypto,0.01,interval='15second',span='hour')
-                        if minTrend > 0 and secTrend > 0:
-                            if np.sign(y_deriv2Ask[-1]) + np.sign(y_deriv2Ask[-2]) == 0:
-                                if y_deriv1Ask[-1] > y_deriv1Ask[-5]:
-                                    trade('buy')
-                    else:
-                        if np.sign(y_deriv2Bid[-1])+np.sign(y_deriv2Bid[-2]) == 0:
-                            if y_deriv1Bid[-1] < y_deriv1Bid[-5]:
-                                if round(num,roundTo) > round(buyPrice,roundTo):
-                                    trade('sell')
-                        elif round(buyPrice,roundTo)-round(num,roundTo) > round(buyPrice,roundTo)*0.01:
-                            trade('sell')
-                    stpwtch.restart()
-    except Exception as e:
-        print(f'Encountered exception:',type(e).__name__,e)
-        break
+            if len(y_smoothAsk) > 1:
+                y_deriv1Ask.append((np.diff(y_smoothAsk[-2:])/stpwtch.duration)[-1])
+                y_deriv1Bid.append((np.diff(y_smoothBid[-2:])/stpwtch.duration)[-1])
+            if len(y_deriv1Ask) > 1:
+                y_deriv2Ask.append((np.diff(y_deriv1Ask[-2:])/stpwtch.duration)[-1])
+                y_deriv2Bid.append((np.diff(y_deriv1Bid[-2:])/stpwtch.duration)[-1])
+            orderState = rh.orders.get_all_crypto_orders()[0]['state']
+            if orderState != 'confirmed' and orderState != 'unconfirmed':
+                if state == 'sell':
+                    # minTrend = trend(crypto,0.02)
+                    # secTrend = trend(crypto,0.01,interval='15second',span='hour')
+                    # if minTrend > 0.05 and secTrend > 0:
+                    if np.sign(y_deriv1Ask[-1]) + np.sign(y_deriv1Ask[-2]) == 0:
+                        if y_deriv2Ask[-1] > 0:
+                            if lessThanLocalPeak(num):
+                                trade('buy')
+                else:
+                    if np.sign(y_deriv1Bid[-1])+np.sign(y_deriv1Bid[-2]) == 0:
+                        if y_deriv2Bid[-1] < 0:
+                            #if :
+                                trade('sell')
+                    elif (ask - buyPrice) < -(buyPrice*0.01) and positionQty > 0:
+                        trade('sell')
+        except Exception as e:
+            print(f'Encountered exception:',type(e).__name__,e)
+            break
+        stpwtch.restart()
 
 try:
     if not(suppressOutput):
         print(f'Made {trades} trades')
     print(f'Program ran for {round(totalTime.duration,2)} seconds')
     df2 = pd.read_csv(f'stock_objs/{crypto}/trades.csv')
-    print(f'Final balance: {df2["balance"].iat[-1]}, Profit: {100*(round(df2["balance"].iat[-1]-starting_balance,roundTo)/df2["balance"].iat[-1])}%')
+    print(f'Final balance: {df2["balance"].iat[-1]}, Profit: {round(100*(round(df2["balance"].iat[-1]-starting_balance,roundTo)/df2["balance"].iat[-1]),5)}%')
     plot(df,df2) # df = quotes, df2 = trades
 except Exception as e:
     print(f'Encountered exception:',type(e).__name__,e)
