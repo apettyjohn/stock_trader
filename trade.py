@@ -287,29 +287,30 @@ while not(done):
             elif state == 'sell': # This actually means buy
                 num = ask
                 column = 'ask'
-            last = df[column].iat[-1]
+            #last = df[column].iat[-1]
             #if last != num:
             df = df.append(pd.Series([ask,bid,(ask+bid)/2],index=df.columns),ignore_index=True)
             df.to_csv(f'stock_objs/{crypto}/quotes.csv',index=False)
-            if len(df.index) > 20:
-                y_smoothAsk.append(ask)
-                y_smoothBid.append(bid)
-                if dropQuotes:
-                    if len(df.index) > 1000:
-                        df.drop(index=0,inplace=True)
-                        df.reset_index(drop=True)
-                        y_smoothBid.remove(y_smoothBid[0])
-                        y_smoothAsk.remove(y_smoothAsk[0])
-                        y_deriv1Bid.remove(y_deriv1Bid[0])
-                        y_deriv1Ask.remove(y_deriv1Ask[0])
-                        y_deriv2Bid.remove(y_deriv2Bid[0])
-                        y_deriv2Ask.remove(y_deriv2Ask[0])
+            y_smoothAsk.append(ask)
+            y_smoothBid.append(bid)
+            if dropQuotes:
+                if len(df.index) > 1000:
+                    df.drop(index=0,inplace=True)
+                    df.reset_index(drop=True)
+                    y_smoothBid.remove(y_smoothBid[0])
+                    y_smoothAsk.remove(y_smoothAsk[0])
+                    y_deriv1Bid.remove(y_deriv1Bid[0])
+                    y_deriv1Ask.remove(y_deriv1Ask[0])
+                    y_deriv2Bid.remove(y_deriv2Bid[0])
+                    y_deriv2Ask.remove(y_deriv2Ask[0])
             if len(y_smoothAsk) > 1:
                 y_deriv1Ask.append(np.diff(y_smoothAsk[-2:])[-1])
                 y_deriv1Bid.append(np.diff(y_smoothBid[-2:])[-1])
             if len(y_deriv1Ask) > 1:
                 y_deriv2Ask.append(np.diff(y_deriv1Ask[-2:])[-1])
                 y_deriv2Bid.append(np.diff(y_deriv1Bid[-2:])[-1])
+            else:
+                continue
             orderState = rh.orders.get_all_crypto_orders()[0]['state']
             if orderState != 'confirmed' and orderState != 'unconfirmed':
                 if state == 'sell':
