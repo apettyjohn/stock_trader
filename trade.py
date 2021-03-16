@@ -22,6 +22,7 @@ def trade(trade):
     global state
     global trades
     global buyPrice
+    global sellPrice
     global positionQty
     global balance
     global frequency
@@ -35,7 +36,7 @@ def trade(trade):
         if crypto != 'DOGE':
             if roundTo > 2:
                 num = round(num,2)
-        trade_size = math.floor(balance/(2*num))
+        trade_size = math.floor((balance*9)/(10*num))
         positionQty = trade_size
         rh_marketOrder(crypto,trade_size,'buy')
         time.sleep(0.5)
@@ -47,7 +48,6 @@ def trade(trade):
         frequency = 1800
         if not(suppressOutput):
             print(f'Bought {trade_size} shares of {crypto} @ {buyPrice}')
-            print(f'1stDerivative:{y_deriv1Ask},2ndDerivative:{y_deriv2Ask}')
     elif trade == 'sell':
         num = bid
         if crypto != 'DOGE':
@@ -61,10 +61,10 @@ def trade(trade):
                 break
         if not(suppressOutput):
             print(f'Sold {positionQty} shares of {crypto} @ {num}')
-            print(f'1stDerivative:{y_deriv1Bid},2ndDerivative:{y_deriv2Bid}')
         balance += (num-buyPrice)*positionQty
         positionQty = 0
         frequency = 1800
+        sellPrice = num
     try:
         df2 = pd.read_csv(f'stock_objs/{crypto}/trades.csv')
         df2 = df2.append(pd.Series([df.index[-1],num,trade,round(balance,roundTo)],index=df2.columns),ignore_index=True)
@@ -212,14 +212,24 @@ def lessThanLocalPeak(num):
     for number in data[-math.ceil(len(data)*0.5):]: # peak in the last 12 hours
         if float(number['close_price']) > peak:
             peak = float(number['close_price'])
-    for n in range(1,6):
-        if np.diff(y_smoothAsk[-n:1-n])[-1]/y_smoothAsk[-n] < -0.025: # if there was a change
+    if len(y_smoothAsk) < 8:
+        return False
+    for n in range(2,7):
+        if n == 2:
+            diffs = np.diff(y_smoothAsk[-n:])[0]
+        else:
+            diffs = np.diff(y_smoothAsk[-n:2-n])[0]
+        if diffs/y_smoothAsk[-n] < -0.025: # if there was a change
             bigDrop = True
+    if timeFromTrade.duration < 7250:
+        if sellPrice > 0:
+            if num > sellPrice*1.005:
+                return True
     return (peak-num >= peak*0.035) or bigDrop
 def peaked(num) -> bool:
     global frequency
     if (num-buyPrice)/buyPrice >= 0.02:
-        if (num-buyPrice)/buyPrice >= 0.05:
+        if (num-buyPrice)/buyPrice >= 0.04:
             frequency = 100
             return True
         else:
@@ -229,7 +239,34 @@ def peaked(num) -> bool:
                 frequency = 100
                 return True
     return False
-
+def startingPosition() -> bool:
+    global state
+    global positionQty
+    global buyPrice
+    try:
+        order = rh.orders.get_all_crypto_orders()[0]
+    except:
+        rh_login()
+        order = rh.orders.get_all_crypto_orders()[0]
+    if order['state'] == 'filled':
+        if order['side'] == 'buy':
+            state = 'buy'
+            positionQty = float(order['quantity'])
+            buyPrice = float(order['price'])
+            return True
+    return False
+def formatTotalTime(time):
+    hours = math.floor(time/3600)
+    time -= hours * 3600
+    minutes = math.floor(time/60)
+    time -= minutes * 60
+    seconds = math.floor(time)
+    time -= seconds
+    if time > 0:
+        miliseconds = int(round(time,3)*1000)
+    else:
+        miliseconds = 0
+    return f'{hours}:{minutes}:{seconds}:{miliseconds}'
 
 # Setup
 y_smoothBid = []
@@ -243,6 +280,7 @@ suppressOutput = False
 dropQuotes = True
 trades = 0
 buyPrice = 0
+sellPrice = 0
 positionQty = 0
 roundTo = 2
 frequency = 1800
@@ -261,6 +299,7 @@ rh_login()
 save_stock(crypto)
 print(f'Trading {crypto}')
 # ------------------------
+startingPosition()
 balance = float(rh.account.load_account_profile()['crypto_buying_power'])
 starting_balance = balance
 max_order_size = float(rh.crypto.get_crypto_info(crypto)['max_order_size'])
@@ -271,8 +310,8 @@ df = pd.DataFrame([[ask,bid,(ask+bid)/2]],columns=['ask','bid','mark'])
 df.to_csv(f'stock_objs/{crypto}/quotes.csv',index=False)
 y_smoothAsk.append(ask)
 y_smoothBid.append(bid)
-# do this code until user quits
-while not(done):
+# -----------------------------
+while not(done):     # do this code until user quits
     if time2Logout.duration > 86000:
         rh_logout(signBackIn=True)
         time2Logout.restart()
@@ -304,11 +343,11 @@ while not(done):
                     y_deriv2Bid.remove(y_deriv2Bid[0])
                     y_deriv2Ask.remove(y_deriv2Ask[0])
             if len(y_smoothAsk) > 1:
-                y_deriv1Ask.append(np.diff(y_smoothAsk[-2:])[-1])
-                y_deriv1Bid.append(np.diff(y_smoothBid[-2:])[-1])
+                y_deriv1Ask.append(np.diff(y_smoothAsk[-2:])[0])
+                y_deriv1Bid.append(np.diff(y_smoothBid[-2:])[0])
             if len(y_deriv1Ask) > 1:
-                y_deriv2Ask.append(np.diff(y_deriv1Ask[-2:])[-1])
-                y_deriv2Bid.append(np.diff(y_deriv1Bid[-2:])[-1])
+                y_deriv2Ask.append(np.diff(y_deriv1Ask[-2:])[0])
+                y_deriv2Bid.append(np.diff(y_deriv1Bid[-2:])[0])
             else:
                 continue
             orderState = rh.orders.get_all_crypto_orders()[0]['state']
@@ -337,7 +376,7 @@ while not(done):
 try:
     if not(suppressOutput):
         print(f'Made {trades} trades')
-    print(f'Program ran for {round(totalTime.duration,2)} seconds')
+    print(f'Program ran for {formatTotalTime(round(totalTime.duration,2))} (hrs:min:sec:milisec)')
     df2 = pd.read_csv(f'stock_objs/{crypto}/trades.csv')
     print(f'Final balance: {df2["balance"].iat[-1]}, Profit: {round(100*(round(df2["balance"].iat[-1]-starting_balance,roundTo)/df2["balance"].iat[-1]),5)}%')
     plot(df,df2) # df = quotes, df2 = trades
