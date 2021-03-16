@@ -23,9 +23,10 @@ def trade(trade):
     global trades
     global buyPrice
     global positionQty
-    global trades
     global balance
+    global frequency
     state = trade
+    timeFromTrade.restart()
     num = rh_getPrice(crypto)    
     ask = round(float(num['ask_price']),roundTo)
     bid = round(float(num['bid_price']),roundTo)
@@ -43,6 +44,7 @@ def trade(trade):
             if order['state'] != 'confirmed' and order['state'] != 'unconfirmed':
                 break
         buyPrice = num
+        frequency = 1800
         if not(suppressOutput):
             print(f'Bought {trade_size} shares of {crypto} @ {buyPrice}')
             print(f'1stDerivative:{y_deriv1Ask},2ndDerivative:{y_deriv2Ask}')
@@ -62,6 +64,7 @@ def trade(trade):
             print(f'1stDerivative:{y_deriv1Bid},2ndDerivative:{y_deriv2Bid}')
         balance += (num-buyPrice)*positionQty
         positionQty = 0
+        frequency = 1800
     try:
         df2 = pd.read_csv(f'stock_objs/{crypto}/trades.csv')
         df2 = df2.append(pd.Series([df.index[-1],num,trade,round(balance,roundTo)],index=df2.columns),ignore_index=True)
@@ -205,25 +208,27 @@ def trend(crypto,fractionOfDay=1,interval='5minute',span='day'):
 def lessThanLocalPeak(num):
     data = rh_getHistoricalCryptoPrice(crypto,interval='5minute',span='day')
     peak = 0
-    for number in data[-math.ceil(len(data)*0.5):]:
+    bigDrop = False
+    for number in data[-math.ceil(len(data)*0.5):]: # peak in the last 12 hours
         if float(number['close_price']) > peak:
             peak = float(number['close_price'])
-    return peak-num >= peak*0.05
-def peaked(num):
-    data = rh_getHistoricalCryptoPrice(crypto,interval='15second',span='hour')
-    peak = 0
-    count = 0
-    for number in data:
-        if float(number['close_price']) > peak:
-            peak = float(number['close_price'])
-    for number in data.reverse():
-        count += 1
-        number = float(number['close_price'])
-        if number == peak:
-            break
-    total = count * 0.25
-    if (peak-num):
-        return True
+    for n in range(1,6):
+        if np.diff(y_smoothAsk[-n:1-n])[-1]/y_smoothAsk[-n] < -0.025: # if there was a change
+            bigDrop = True
+    return (peak-num >= peak*0.035) or bigDrop
+def peaked(num) -> bool:
+    global frequency
+    if (num-buyPrice)/buyPrice >= 0.02:
+        if (num-buyPrice)/buyPrice >= 0.05:
+            frequency = 100
+            return True
+        else:
+            if timeFromTrade.duration > 43200:
+                return False
+            else:
+                frequency = 100
+                return True
+    return False
 
 
 # Setup
@@ -240,14 +245,17 @@ trades = 0
 buyPrice = 0
 positionQty = 0
 roundTo = 2
+frequency = 1800
 crypto = 'ETC'
 state = 'sell'
 stpwtch = Stopwatch()
 totalTime = Stopwatch()
 time2Logout = Stopwatch()
+timeFromTrade = Stopwatch()
 stpwtch.start()
 totalTime.start()
 time2Logout.start()
+timeFromTrade.start()
 keyboardListener()
 rh_login()
 save_stock(crypto)
@@ -267,7 +275,8 @@ y_smoothBid.append(bid)
 while not(done):
     if time2Logout.duration > 86000:
         rh_logout(signBackIn=True)
-    if stpwtch.duration > 100:
+        time2Logout.restart()
+    if stpwtch.duration > frequency:
         try:
             num = rh_getPrice(crypto)
             ask = round(float(num['ask_price']),roundTo)
@@ -283,8 +292,8 @@ while not(done):
             df = df.append(pd.Series([ask,bid,(ask+bid)/2],index=df.columns),ignore_index=True)
             df.to_csv(f'stock_objs/{crypto}/quotes.csv',index=False)
             if len(df.index) > 20:
-                y_smoothAsk.append(gaussian_filter1d(df['ask'][-19:], 3)[-1])
-                y_smoothBid.append(gaussian_filter1d(df['bid'][-19:], 3)[-1])
+                y_smoothAsk.append(ask)
+                y_smoothBid.append(bid)
                 if dropQuotes:
                     if len(df.index) > 1000:
                         df.drop(index=0,inplace=True)
@@ -295,29 +304,27 @@ while not(done):
                         y_deriv1Ask.remove(y_deriv1Ask[0])
                         y_deriv2Bid.remove(y_deriv2Bid[0])
                         y_deriv2Ask.remove(y_deriv2Ask[0])
-            else:
-                y_smoothAsk.append(gaussian_filter1d(df['ask'], 3)[-1])
-                y_smoothBid.append(gaussian_filter1d(df['bid'], 3)[-1])
             if len(y_smoothAsk) > 1:
-                y_deriv1Ask.append((np.diff(y_smoothAsk[-2:])/stpwtch.duration)[-1])
-                y_deriv1Bid.append((np.diff(y_smoothBid[-2:])/stpwtch.duration)[-1])
+                y_deriv1Ask.append(np.diff(y_smoothAsk[-2:])[-1])
+                y_deriv1Bid.append(np.diff(y_smoothBid[-2:])[-1])
             if len(y_deriv1Ask) > 1:
-                y_deriv2Ask.append((np.diff(y_deriv1Ask[-2:])/stpwtch.duration)[-1])
-                y_deriv2Bid.append((np.diff(y_deriv1Bid[-2:])/stpwtch.duration)[-1])
+                y_deriv2Ask.append(np.diff(y_deriv1Ask[-2:])[-1])
+                y_deriv2Bid.append(np.diff(y_deriv1Bid[-2:])[-1])
             orderState = rh.orders.get_all_crypto_orders()[0]['state']
             if orderState != 'confirmed' and orderState != 'unconfirmed':
                 if state == 'sell':
-                    # minTrend = trend(crypto,0.02)
-                    # secTrend = trend(crypto,0.01,interval='15second',span='hour')
-                    # if minTrend > 0.05 and secTrend > 0:
-                    if np.sign(y_deriv1Ask[-1]) + np.sign(y_deriv1Ask[-2]) == 0:
-                        if y_deriv2Ask[-1] > 0:
-                            if lessThanLocalPeak(num):
+                    #minTrend = trend(crypto,0.5)
+                    #secTrend = trend(crypto,interval='15second',span='hour')
+                    #if secTrend < 0:
+                    if lessThanLocalPeak(num):
+                        if np.sign(y_deriv1Ask[-1]) + np.sign(y_deriv1Ask[-2]) == 0:
+                            if y_deriv2Ask[-1] > 0:
                                 trade('buy')
+                        frequency = 100
                 else:
-                    if np.sign(y_deriv1Bid[-1])+np.sign(y_deriv1Bid[-2]) == 0:
-                        if y_deriv2Bid[-1] < 0:
-                            #if :
+                    if peaked(num):
+                        if np.sign(y_deriv1Bid[-1])+np.sign(y_deriv1Bid[-2]) == 0:
+                            if y_deriv2Bid[-1] < 0:
                                 trade('sell')
                     elif (ask - buyPrice) < -(buyPrice*0.01) and positionQty > 0:
                         trade('sell')
