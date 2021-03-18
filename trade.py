@@ -224,7 +224,8 @@ def lessThanLocalPeak(num):
     if timeFromTrade.duration < 7250:
         if sellPrice > 0:
             if num > sellPrice*1.005:
-                return True
+                if trend(crypto,0.083) > 0:
+                    return True
     return (peak-num >= peak*0.035) or bigDrop
 def peaked(num) -> bool:
     global frequency
@@ -283,7 +284,7 @@ buyPrice = 0
 sellPrice = 0
 positionQty = 0
 roundTo = 2
-frequency = 1800
+frequency = 1
 crypto = 'ETC'
 state = 'sell'
 stpwtch = Stopwatch()
@@ -312,8 +313,8 @@ y_smoothAsk.append(ask)
 y_smoothBid.append(bid)
 # -----------------------------
 while not(done):     # do this code until user quits
-    if time2Logout.duration > 86000:
-        rh_logout(signBackIn=True)
+    if time2Logout.duration > 86500:
+        rh_login()
         time2Logout.restart()
     if stpwtch.duration > frequency:
         try:
