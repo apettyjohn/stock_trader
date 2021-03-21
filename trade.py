@@ -1,3 +1,5 @@
+# Created by Adam Pettyjohn
+
 import math,json,time,os
 import pandas as pd
 from api_keys import *
