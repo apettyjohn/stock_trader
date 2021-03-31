@@ -33,11 +33,11 @@ def trade(trade):
     num = rh_getPrice(crypto)    
     ask = round(float(num['ask_price']),roundTo)
     bid = round(float(num['bid_price']),roundTo)
+    if crypto != 'DOGE':
+        if roundTo > 2:
+            num = round(num,2)
     if trade == 'buy':
         num = ask
-        if crypto != 'DOGE':
-            if roundTo > 2:
-                num = round(num,2)
         trade_size = math.floor((balance*9)/(10*num))
         positionQty = trade_size
         rh_marketOrder(crypto,trade_size,'buy')
@@ -52,21 +52,18 @@ def trade(trade):
             print(f'Bought {trade_size} shares of {crypto} @ {buyPrice}')
     elif trade == 'sell':
         num = bid
-        if crypto != 'DOGE':
-            if roundTo > 2:
-                num = round(num,2)
         rh_marketOrder(crypto,positionQty,'sell')
         time.sleep(0.5)
         while True:
             order = rh.orders.get_all_crypto_orders()[0]
             if order['state'] != 'confirmed' and order['state'] != 'unconfirmed':
                 break
-        if not(suppressOutput):
-            print(f'Sold {positionQty} shares of {crypto} @ {num}')
-        balance += (num-buyPrice)*positionQty
+        balance = float(rh.account.load_account_profile()['crypto_buying_power'])
         positionQty = 0
         frequency = 1800
         sellPrice = num
+        if not(suppressOutput):
+            print(f'Sold {positionQty} shares of {crypto} @ {num}')
     try:
         df2 = pd.read_csv(f'stock_objs/{crypto}/trades.csv')
         df2 = df2.append(pd.Series([df.index[-1],num,trade,round(balance,roundTo)],index=df2.columns),ignore_index=True)
@@ -129,6 +126,34 @@ def plot(df1,df2):
             y3.append(df2['price'][x])
     buySell(x1,y1,x2,y2,x3,y3)
     #regressions(x1,y1)
+def formatTotalTime(time):
+    hours = math.floor(time/3600)
+    time -= hours * 3600
+    minutes = math.floor(time/60)
+    time -= minutes * 60
+    seconds = math.floor(time)
+    time -= seconds
+    if time > 0:
+        miliseconds = int(round(time,3)*1000)
+    else:
+        miliseconds = 0
+    return f'{hours}:{minutes}:{seconds}:{miliseconds}'
+def startingPosition() -> bool:
+    global state
+    global positionQty
+    global buyPrice
+    try:
+        order = rh.orders.get_all_crypto_orders()[0]
+    except:
+        rh_login()
+        order = rh.orders.get_all_crypto_orders()[0]
+    if order['state'] == 'filled':
+        if order['side'] == 'buy':
+            state = 'buy'
+            positionQty = float(order['quantity'])
+            buyPrice = float(order['price'])
+            return True
+    return False
 # Robinhood
 def rh_login():
     try:
@@ -221,55 +246,27 @@ def lessThanLocalPeak(num):
             diffs = np.diff(y_smoothAsk[-n:])[0]
         else:
             diffs = np.diff(y_smoothAsk[-n:2-n])[0]
-        if diffs/y_smoothAsk[-n] < -0.025: # if there was a change
+        if diffs/y_smoothAsk[-n] < -0.02: # if there was a change
             bigDrop = True
-    if timeFromTrade.duration < 7250:
-        if sellPrice > 0:
-            if num > sellPrice*1.005:
-                if trend(crypto,0.083) > 0:
-                    return True
-    return (peak-num >= peak*0.035) or bigDrop
+    return (peak-num >= peak*0.04) or bigDrop
 def peaked(num) -> bool:
     global frequency
+    data = rh_getHistoricalCryptoPrice(crypto,interval='5minute',span='day')
     if (num-buyPrice)/buyPrice >= 0.02:
-        if (num-buyPrice)/buyPrice >= 0.04:
-            frequency = 100
-            return True
+        const = math.ceil(len(data)*(math.floor(timeFromTrade.duration/3600)/24))
+        if const < 1:
+            dataRange = data[-const:]
         else:
-            if timeFromTrade.duration > 43200:
-                return False
-            else:
+            dataRange = data[:]
+        for number in dataRange:
+            if (number-buyPrice)/buyPrice <= 0.005:
                 frequency = 100
                 return True
-    return False
-def startingPosition() -> bool:
-    global state
-    global positionQty
-    global buyPrice
-    try:
-        order = rh.orders.get_all_crypto_orders()[0]
-    except:
-        rh_login()
-        order = rh.orders.get_all_crypto_orders()[0]
-    if order['state'] == 'filled':
-        if order['side'] == 'buy':
-            state = 'buy'
-            positionQty = float(order['quantity'])
-            buyPrice = float(order['price'])
+    elif timeFromTrade.duration > 129600:
+        if (num-buyPrice)/buyPrice >= 0.005:
+            frequency = 100
             return True
     return False
-def formatTotalTime(time):
-    hours = math.floor(time/3600)
-    time -= hours * 3600
-    minutes = math.floor(time/60)
-    time -= minutes * 60
-    seconds = math.floor(time)
-    time -= seconds
-    if time > 0:
-        miliseconds = int(round(time,3)*1000)
-    else:
-        miliseconds = 0
-    return f'{hours}:{minutes}:{seconds}:{miliseconds}'
 
 # Setup
 y_smoothBid = []
@@ -315,7 +312,7 @@ y_smoothAsk.append(ask)
 y_smoothBid.append(bid)
 # -----------------------------
 while not(done):     # do this code until user quits
-    if time2Logout.duration > 86500:
+    if time2Logout.duration > 86400:
         rh_login()
         time2Logout.restart()
     if stpwtch.duration > frequency:
